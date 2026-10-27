@@ -2,6 +2,7 @@
   "name": "ftcli",
   "version": "0.1.0",
   "description": "FTP list / diff / upload / download / backup CLI",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "ftcli": "dist/index.js"
