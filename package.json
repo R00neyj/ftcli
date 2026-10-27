@@ -3,14 +3,25 @@
   "version": "0.1.0",
   "description": "FTP list / diff / upload / download / backup CLI",
   "license": "MIT",
+  "keywords": ["ftp", "cli", "diff", "upload", "download", "backup", "deploy"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/R00neyj/ftcli.git"
+  },
+  "homepage": "https://github.com/R00neyj/ftcli#readme",
+  "bugs": "https://github.com/R00neyj/ftcli/issues",
   "type": "module",
   "bin": {
     "ftcli": "dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run build"
   },
   "engines": {
     "node": ">=20"
