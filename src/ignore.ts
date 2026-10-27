@@ -6,7 +6,7 @@ import { STATE_DIR } from "./config.js";
 const IGNORE_FILES = [".ftignore", ".ftpignore"];
 
 export async function loadIgnore(cwd: string): Promise<Ignore> {
-  const ig = ignore().add([STATE_DIR, ".git"]);
+  const ig = ignore().add([STATE_DIR, ".git", "*.ftcli-part"]);
   for (const name of IGNORE_FILES) {
     try {
       ig.add(await readFile(path.join(cwd, name), "utf8"));

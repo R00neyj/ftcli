@@ -19,6 +19,11 @@ program
 const run = (cmd: Command, fn: (ctx: Context) => Promise<void>) =>
   withContext(cmd.optsWithGlobals<GlobalOpts>(), fn);
 
+const intOption = (min: number, max: number) => (v: string) =>
+  Math.min(max, Math.max(min, Number.parseInt(v, 10) || min));
+const jobsOption = ["-j, --jobs <n>", "병렬 연결 수 (1~4)", intOption(1, 4), 2] as const;
+const retriesOption = ["--retries <n>", "일시 오류 재시도 횟수 (0~5)", intOption(0, 5), 1] as const;
+
 program
   .command("init")
   .description(".ftcli/config.json 템플릿 생성")
@@ -46,6 +51,8 @@ program
   .argument("[files...]", "대상 경로 (생략 시 전체)")
   .option("-n, --dry-run", "실행 없이 대상만 출력")
   .option("--no-backup", "원격 .bak 생성 안 함")
+  .option(...jobsOption)
+  .option(...retriesOption)
   .action((files: string[], opts, cmd: Command) => run(cmd, (ctx) => upload(ctx, files, opts)));
 
 program
@@ -54,13 +61,17 @@ program
   .argument("[files...]", "대상 경로 (생략 시 전체)")
   .option("-n, --dry-run", "실행 없이 대상만 출력")
   .option("--no-backup", "덮어쓰는 로컬 파일 백업 안 함")
+  .option(...jobsOption)
+  .option(...retriesOption)
   .action((files: string[], opts, cmd: Command) => run(cmd, (ctx) => download(ctx, files, opts)));
 
 program
   .command("backup")
   .description("원격 파일을 .ftcli/backups/<시각>/ 로 내려받아 보관")
   .argument("[paths...]", "대상 경로 (생략 시 전체)")
-  .action((paths: string[], _opts, cmd: Command) => run(cmd, (ctx) => backup(ctx, paths)));
+  .option(...jobsOption)
+  .option(...retriesOption)
+  .action((paths: string[], opts, cmd: Command) => run(cmd, (ctx) => backup(ctx, paths, opts)));
 
 program.parseAsync().catch((err: Error) => {
   console.error(err.message);

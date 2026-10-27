@@ -1,9 +1,11 @@
 import path from "node:path";
 import { STATE_DIR } from "../config.js";
 import { collectRemote, select } from "../compare.js";
+import { runPool, type Job, type PoolOptions } from "../parallel.js";
 import { timestamp, type Context } from "../session.js";
+import { downloadVerified, removePart } from "../transfer.js";
 
-export async function backup(ctx: Context, paths: string[]): Promise<void> {
+export async function backup(ctx: Context, paths: string[], opts: PoolOptions): Promise<void> {
   const remote = await collectRemote(ctx.transport, ctx.ig);
   const targets = select(
     [...remote.keys()].map((p) => ({ path: p })),
@@ -15,15 +17,15 @@ export async function backup(ctx: Context, paths: string[]): Promise<void> {
   }
 
   const root = path.join(ctx.cwd, STATE_DIR, "backups", timestamp());
-  let failed = 0;
-  for (const { path: rel } of targets) {
-    try {
-      await ctx.transport.download(rel, path.join(root, rel));
-    } catch (err) {
-      failed++;
-      console.error(`실패 ${rel}: ${(err as Error).message}`);
-    }
-  }
-  console.log(`백업 ${targets.length - failed}/${targets.length}건 → ${root}`);
-  if (failed > 0) process.exitCode = 2;
+  const jobs: Job[] = targets.map(({ path: rel }) => {
+    const dest = path.join(root, rel);
+    return {
+      path: rel,
+      label: rel,
+      run: (t) => downloadVerified(t, rel, dest, remote.get(rel)?.size ?? 0),
+      cleanup: () => removePart(dest),
+    };
+  });
+  console.log(`백업 위치: ${root}`);
+  await runPool(ctx, jobs, opts);
 }

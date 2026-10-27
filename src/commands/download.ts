@@ -1,15 +1,43 @@
 import { copyFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { STATE_DIR } from "../config.js";
-import { collectRemote, compare, select } from "../compare.js";
+import { collectRemote, compare, select, type Status } from "../compare.js";
+import { runPool, type Job, type PoolOptions } from "../parallel.js";
 import { scanLocal } from "../scan.js";
 import { timestamp, type Context } from "../session.js";
+import { downloadVerified, removePart } from "../transfer.js";
 
-export async function download(
-  ctx: Context,
-  files: string[],
-  opts: { dryRun?: boolean; backup: boolean },
-): Promise<void> {
+export interface DownloadOpts extends PoolOptions {
+  dryRun?: boolean;
+  backup: boolean;
+}
+
+function downloadJob(
+  cwd: string,
+  rel: string,
+  status: Status,
+  size: number,
+  backupRoot: string | null,
+): Job {
+  const dest = path.join(cwd, rel);
+  let saved = false;
+  return {
+    path: rel,
+    label: `${status === "modified" ? "M" : "-"} ${rel}`,
+    async run(t) {
+      if (backupRoot && !saved) {
+        const copy = path.join(backupRoot, rel);
+        await mkdir(path.dirname(copy), { recursive: true });
+        await copyFile(dest, copy);
+        saved = true;
+      }
+      await downloadVerified(t, rel, dest, size);
+    },
+    cleanup: () => removePart(dest),
+  };
+}
+
+export async function download(ctx: Context, files: string[], opts: DownloadOpts): Promise<void> {
   const local = await scanLocal(ctx.cwd, ctx.ig);
   const remote = await collectRemote(ctx.transport, ctx.ig);
   const targets = select(compare(local, remote), files).filter(
@@ -20,27 +48,20 @@ export async function download(
     return;
   }
 
-  const backupRoot = path.join(ctx.cwd, STATE_DIR, "backups", timestamp());
-  let failed = 0;
-  for (const { path: rel, status } of targets) {
-    const mark = status === "modified" ? "M" : "-";
-    if (opts.dryRun) {
-      console.log(`[dry-run] ${mark} ${rel}`);
-      continue;
-    }
-    const dest = path.join(ctx.cwd, rel);
-    try {
-      if (status === "modified" && opts.backup) {
-        const saved = path.join(backupRoot, rel);
-        await mkdir(path.dirname(saved), { recursive: true });
-        await copyFile(dest, saved);
-      }
-      await ctx.transport.download(rel, dest);
-      console.log(`${mark} ${rel}`);
-    } catch (err) {
-      failed++;
-      console.error(`실패 ${rel}: ${(err as Error).message}`);
-    }
+  if (opts.dryRun) {
+    for (const c of targets) console.log(`[dry-run] ${c.status === "modified" ? "M" : "-"} ${c.path}`);
+    return;
   }
-  if (failed > 0) process.exitCode = 2;
+
+  const backupRoot = path.join(ctx.cwd, STATE_DIR, "backups", timestamp());
+  const jobs = targets.map((c) =>
+    downloadJob(
+      ctx.cwd,
+      c.path,
+      c.status,
+      remote.get(c.path)?.size ?? 0,
+      c.status === "modified" && opts.backup ? backupRoot : null,
+    ),
+  );
+  await runPool(ctx, jobs, opts);
 }

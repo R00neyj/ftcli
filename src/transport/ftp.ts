@@ -36,9 +36,28 @@ export class FtpTransport implements Transport {
   }
 
   async upload(localPath: string, remotePath: string): Promise<void> {
-    const abs = this.abs(remotePath);
-    await this.client.ensureDir(posix.dirname(abs));
-    await this.client.uploadFrom(localPath, abs);
+    await this.client.uploadFrom(localPath, this.abs(remotePath));
+  }
+
+  async mkdirs(dirs: string[]): Promise<void> {
+    for (const dir of new Set(dirs)) await this.client.ensureDir(this.abs(dir));
+  }
+
+  async size(remotePath: string): Promise<number | null> {
+    try {
+      return await this.client.size(this.abs(remotePath));
+    } catch {
+      // SIZE 거부 서버는 목록으로 대체
+    }
+    try {
+      const dir = posix.dirname(remotePath);
+      const hit = (await this.client.list(this.abs(dir === "." ? "" : dir))).find(
+        (e) => e.name === posix.basename(remotePath),
+      );
+      return hit ? hit.size : null;
+    } catch {
+      return null;
+    }
   }
 
   async download(remotePath: string, localPath: string): Promise<void> {

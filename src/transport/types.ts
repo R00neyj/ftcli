@@ -12,6 +12,8 @@ export interface Transport {
   list(dir: string, recursive: boolean): Promise<RemoteEntry[]>;
   upload(localPath: string, remotePath: string): Promise<void>;
   download(remotePath: string, localPath: string): Promise<void>;
+  mkdirs(dirs: string[]): Promise<void>;
+  size(remotePath: string): Promise<number | null>;
   rename(from: string, to: string): Promise<void>;
   remove(remotePath: string, ignoreMissing?: boolean): Promise<void>;
 }

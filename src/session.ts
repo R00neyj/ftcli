@@ -15,6 +15,7 @@ export interface Context {
   cfg: Config;
   ig: Ignore;
   transport: Transport;
+  open(): Promise<Transport>;
 }
 
 export async function withContext<T>(
@@ -23,10 +24,19 @@ export async function withContext<T>(
 ): Promise<T> {
   const cwd = path.resolve(globals.cwd ?? process.cwd());
   const cfg = await loadConfig(cwd, globals.password);
-  const transport = new FtpTransport(cfg);
+  const open = async (): Promise<Transport> => {
+    const t = new FtpTransport(cfg);
+    try {
+      await t.connect();
+    } catch (err) {
+      t.close();
+      throw err;
+    }
+    return t;
+  };
+  const transport = await open();
   try {
-    await transport.connect();
-    return await fn({ cwd, cfg, ig: await loadIgnore(cwd), transport });
+    return await fn({ cwd, cfg, ig: await loadIgnore(cwd), transport, open });
   } finally {
     transport.close();
   }
