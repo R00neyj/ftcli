@@ -1,0 +1,27 @@
+{
+  "name": "ftcli",
+  "version": "0.1.0",
+  "description": "FTP list / diff / upload / download / backup CLI",
+  "type": "module",
+  "bin": {
+    "ftcli": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "basic-ftp": "^6.2.3",
+    "commander": "^15.0.0",
+    "ignore": "^7.0.14"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
