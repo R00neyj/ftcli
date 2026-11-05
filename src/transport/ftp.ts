@@ -2,7 +2,8 @@ import { Client } from "basic-ftp";
 import { mkdir } from "node:fs/promises";
 import path, { posix } from "node:path";
 import type { Config } from "../config.js";
-import type { RemoteEntry, Transport } from "./types.js";
+import type { Writable } from "node:stream";
+import type { RemoteEntry, RemoteStat, Transport } from "./types.js";
 
 export class FtpTransport implements Transport {
   private client = new Client(30_000);
@@ -27,7 +28,12 @@ export class FtpTransport implements Transport {
           out.push({ path: itemRel, size: 0, isDir: true });
           if (recursive) await walk(itemRel);
         } else if (item.isFile) {
-          out.push({ path: itemRel, size: item.size, isDir: false });
+          out.push({
+            path: itemRel,
+            size: item.size,
+            isDir: false,
+            mtime: item.modifiedAt?.toISOString(),
+          });
         }
       }
     };
@@ -58,6 +64,20 @@ export class FtpTransport implements Transport {
     } catch {
       return null;
     }
+  }
+
+  async stat(remotePath: string): Promise<RemoteStat | null> {
+    const size = await this.size(remotePath);
+    if (size === null) return null;
+    try {
+      return { size, mtime: (await this.client.lastMod(this.abs(remotePath))).toISOString() };
+    } catch {
+      return { size, mtime: null };
+    }
+  }
+
+  async downloadToStream(remotePath: string, dest: Writable): Promise<void> {
+    await this.client.downloadTo(dest, this.abs(remotePath));
   }
 
   async download(remotePath: string, localPath: string): Promise<void> {

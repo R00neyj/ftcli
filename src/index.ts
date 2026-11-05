@@ -7,7 +7,15 @@ import { download } from "./commands/download.js";
 import { init } from "./commands/init.js";
 import { ls } from "./commands/ls.js";
 import { upload } from "./commands/upload.js";
-import { withContext, type Context, type GlobalOpts } from "./session.js";
+import { jobsOption, retriesOption, type RunFn } from "./cli.js";
+import { registerCat } from "./commands/cat.js";
+import { registerFind } from "./commands/find.js";
+import { registerGrep } from "./commands/grep.js";
+import { registerPull } from "./commands/pull.js";
+import { registerPush } from "./commands/push.js";
+import { registerRelease } from "./commands/release.js";
+import { registerStatus } from "./commands/status.js";
+import { withContext, type GlobalOpts } from "./session.js";
 
 const program = new Command();
 program
@@ -16,13 +24,8 @@ program
   .option("-C, --cwd <dir>", "작업 디렉터리 (기본: 현재)")
   .option("--password <pw>", "비밀번호 (기본: FTPCLI_PASSWORD 환경 변수)");
 
-const run = (cmd: Command, fn: (ctx: Context) => Promise<void>) =>
-  withContext(cmd.optsWithGlobals<GlobalOpts>(), fn);
+const run: RunFn = (cmd, fn) => withContext(cmd.optsWithGlobals<GlobalOpts>(), fn).then(() => {});
 
-const intOption = (min: number, max: number) => (v: string) =>
-  Math.min(max, Math.max(min, Number.parseInt(v, 10) || min));
-const jobsOption = ["-j, --jobs <n>", "병렬 연결 수 (1~4)", intOption(1, 4), 4] as const;
-const retriesOption = ["--retries <n>", "일시 오류 재시도 횟수 (0~5)", intOption(0, 5), 1] as const;
 
 program
   .command("init")
@@ -72,6 +75,14 @@ program
   .option(...jobsOption)
   .option(...retriesOption)
   .action((paths: string[], opts, cmd: Command) => run(cmd, (ctx) => backup(ctx, paths, opts)));
+
+registerPull(program, run);
+registerStatus(program, run);
+registerPush(program, run);
+registerCat(program, run);
+registerFind(program, run);
+registerGrep(program, run);
+registerRelease(program, run);
 
 program.parseAsync().catch((err: Error) => {
   console.error(err.message);

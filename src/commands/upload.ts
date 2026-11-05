@@ -10,7 +10,7 @@ export interface UploadOpts extends PoolOptions {
   backup: boolean;
 }
 
-function uploadJob(ctx: Context, rel: string, status: Status, size: number, backup: boolean): Job {
+export function uploadJob(ctx: Context, rel: string, status: Status, size: number, backup: boolean): Job {
   const bak = `${rel}${BAK_SUFFIX}`;
   const needsBackup = status === "modified" && backup;
   let backedUp = false;
