@@ -11,6 +11,7 @@ export interface Config {
   password?: string;
   secure: boolean | "implicit";
   remoteRoot: string;
+  maxLogins?: number;
 }
 
 export const configTemplate: Config = {

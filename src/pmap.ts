@@ -1,5 +1,5 @@
 import type { Context } from "./session.js";
-import { isAuthError, isTransient } from "./transport/errors.js";
+import { isFatal, isTransient } from "./transport/errors.js";
 import type { Transport } from "./transport/types.js";
 
 export interface MapOptions {
@@ -23,12 +23,17 @@ export async function mapPool<T, R>(
 
   const slot = async (primary: boolean): Promise<void> => {
     let t: Transport | undefined = primary ? ctx.transport : undefined;
+    const connect = async (): Promise<Transport> => {
+      const fresh = await ctx.open();
+      if (primary) ctx.transport = fresh;
+      return fresh;
+    };
     try {
       if (!primary) {
         try {
           t = await ctx.open();
         } catch (err) {
-          if (isAuthError(err)) fatal ??= toError(err);
+          if (isFatal(err)) fatal ??= toError(err);
           return;
         }
       }
@@ -36,11 +41,11 @@ export async function mapPool<T, R>(
         const index = next++;
         for (let attempt = 0; ; attempt++) {
           try {
-            t ??= await ctx.open();
+            t ??= await connect();
             results[index] = { ok: true, value: await fn(t, items[index] as T, index) };
             break;
           } catch (err) {
-            if (isAuthError(err)) {
+            if (isFatal(err)) {
               fatal ??= toError(err);
               results[index] = { ok: false, error: toError(err) };
               return;
@@ -51,7 +56,7 @@ export async function mapPool<T, R>(
               continue;
             }
             results[index] = { ok: false, error: toError(err) };
-            if (isTransient(err)) {
+            if (isTransient(err) || (err as { discardConnection?: boolean }).discardConnection) {
               t?.close();
               t = undefined;
             }
@@ -60,13 +65,18 @@ export async function mapPool<T, R>(
         }
       }
     } finally {
-      if (t && t !== ctx.transport) t.close();
+      if (primary) {
+        t ??= await ctx.open().catch(() => undefined);
+        if (t) ctx.transport = t;
+      } else {
+        t?.close();
+      }
     }
   };
 
   const workers = Math.max(1, Math.min(opts.jobs, items.length));
   await Promise.all(Array.from({ length: workers }, (_, i) => slot(i === 0)));
-  if (fatal) throw new Error(`인증 실패로 중단: ${fatal.message}`);
+  if (fatal) throw new Error(`접속 중단: ${fatal.message}`);
   for (let i = 0; i < items.length; i++) {
     results[i] ??= { ok: false, error: new Error("처리되지 않음") };
   }

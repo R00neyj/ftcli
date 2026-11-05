@@ -1,9 +1,14 @@
-import { Client } from "basic-ftp";
+import { Client, FTPError } from "basic-ftp";
 import { mkdir } from "node:fs/promises";
 import path, { posix } from "node:path";
 import type { Config } from "../config.js";
 import type { Writable } from "node:stream";
 import type { RemoteEntry, RemoteStat, Transport } from "./types.js";
+
+const CONNECTION_CODES = new Set([421, 425, 426, 530]);
+
+const isDefinitive = (err: unknown): boolean =>
+  err instanceof FTPError && !CONNECTION_CODES.has(err.code);
 
 export class FtpTransport implements Transport {
   private client = new Client(30_000);
@@ -46,23 +51,33 @@ export class FtpTransport implements Transport {
   }
 
   async mkdirs(dirs: string[]): Promise<void> {
-    for (const dir of new Set(dirs)) await this.client.ensureDir(this.abs(dir));
+    const home = await this.client.pwd();
+    try {
+      for (const dir of new Set(dirs)) {
+        await this.client.ensureDir(this.abs(dir));
+        await this.client.cd(home);
+      }
+    } finally {
+      await this.client.cd(home);
+    }
   }
 
   async size(remotePath: string): Promise<number | null> {
     try {
       return await this.client.size(this.abs(remotePath));
-    } catch {
-      // SIZE 거부 서버는 목록으로 대체
+    } catch (err) {
+      const unparsable = err instanceof Error && /numerical value/.test(err.message);
+      if (!isDefinitive(err) && !unparsable) throw err;
     }
     try {
       const dir = posix.dirname(remotePath);
       const hit = (await this.client.list(this.abs(dir === "." ? "" : dir))).find(
-        (e) => e.name === posix.basename(remotePath),
+        (e) => e.name === posix.basename(remotePath) && e.isFile,
       );
       return hit ? hit.size : null;
-    } catch {
-      return null;
+    } catch (err) {
+      if (isDefinitive(err)) return null;
+      throw err;
     }
   }
 
@@ -71,8 +86,9 @@ export class FtpTransport implements Transport {
     if (size === null) return null;
     try {
       return { size, mtime: (await this.client.lastMod(this.abs(remotePath))).toISOString() };
-    } catch {
-      return { size, mtime: null };
+    } catch (err) {
+      if (isDefinitive(err)) return { size, mtime: null };
+      throw err;
     }
   }
 

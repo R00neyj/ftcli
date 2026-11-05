@@ -136,8 +136,9 @@ export async function recordBase(
   cwd: string,
   rel: string,
   remote: RemoteStat,
+  known?: LocalInfo,
 ): Promise<void> {
-  const local = await localInfo(cwd, rel);
+  const local = known ?? (await localInfo(cwd, rel));
   if (!local) throw new Error(`로컬 파일 없음: ${rel}`);
   ws.set(rel, {
     size: local.size,

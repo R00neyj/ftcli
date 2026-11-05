@@ -22,7 +22,8 @@ program
   .name("ftcli")
   .description("FTP list / diff / upload / download / backup")
   .option("-C, --cwd <dir>", "작업 디렉터리 (기본: 현재)")
-  .option("--password <pw>", "비밀번호 (기본: FTPCLI_PASSWORD 환경 변수)");
+  .option("--password <pw>", "비밀번호 (기본: FTPCLI_PASSWORD 환경 변수)")
+  .option("--retry-auth", "인증 실패 기록이 있어도 1회 재시도");
 
 const run: RunFn = (cmd, fn) => withContext(cmd.optsWithGlobals<GlobalOpts>(), fn).then(() => {});
 
@@ -39,6 +40,7 @@ program
   .description("원격 목록")
   .argument("[dir]", "원격 경로", "")
   .option("-r, --recursive", "하위 포함")
+  .option("--json", "JSON 출력")
   .action((dir: string, opts, cmd: Command) => run(cmd, (ctx) => ls(ctx, dir, opts)));
 
 program

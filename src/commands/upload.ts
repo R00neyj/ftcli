@@ -19,12 +19,15 @@ export function uploadJob(ctx: Context, rel: string, status: Status, size: numbe
     label: `${status === "modified" ? "M" : "+"} ${rel}`,
     async run(t) {
       if (needsBackup && !backedUp) {
-        try {
-          await t.remove(bak, true);
-          await t.rename(rel, bak);
-        } catch (err) {
-          const replyLost = (await t.size(bak)) !== null && (await t.size(rel)) === null;
-          if (!replyLost) throw err;
+        const alreadyMoved = (await t.size(rel)) === null && (await t.size(bak)) !== null;
+        if (!alreadyMoved) {
+          try {
+            await t.remove(bak, true);
+            await t.rename(rel, bak);
+          } catch (err) {
+            const replyLost = (await t.size(bak)) !== null && (await t.size(rel)) === null;
+            if (!replyLost) throw err;
+          }
         }
         backedUp = true;
       }

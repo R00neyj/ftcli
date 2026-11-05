@@ -1,5 +1,5 @@
 import type { Context } from "./session.js";
-import { isAuthError, isTransient } from "./transport/errors.js";
+import { isFatal, isTransient } from "./transport/errors.js";
 import type { Transport } from "./transport/types.js";
 
 export interface Job {
@@ -28,12 +28,17 @@ export async function runPool(ctx: Context, jobs: Job[], opts: PoolOptions): Pro
 
   const slot = async (primary: boolean): Promise<void> => {
     let t: Transport | undefined = primary ? ctx.transport : undefined;
+    const connect = async (): Promise<Transport> => {
+      const fresh = await ctx.open();
+      if (primary) ctx.transport = fresh;
+      return fresh;
+    };
     try {
       if (!primary) {
         try {
           t = await ctx.open();
         } catch (err) {
-          if (isAuthError(err)) fatal ??= err as Error;
+          if (isFatal(err)) fatal ??= err as Error;
           else console.error(`추가 연결 실패 (병렬도 축소): ${message(err)}`);
           return;
         }
@@ -41,15 +46,15 @@ export async function runPool(ctx: Context, jobs: Job[], opts: PoolOptions): Pro
       for (let job = take(); job; job = take()) {
         for (let attempt = 0; ; attempt++) {
           try {
-            t ??= await ctx.open();
+            t ??= await connect();
             await job.run(t);
             ok++;
             log(job.label);
             break;
           } catch (err) {
-            if (isAuthError(err)) {
+            if (isFatal(err)) {
               fatal ??= err as Error;
-              console.error(`중단 ${job.path}: 인증 실패 - 원격 ${job.path} 상태 수동 확인 필요`);
+              console.error(`중단 ${job.path}: 접속 중단 - 원격 ${job.path} 상태 수동 확인 필요`);
               failed.push(job.path);
               return;
             }
@@ -69,7 +74,7 @@ export async function runPool(ctx: Context, jobs: Job[], opts: PoolOptions): Pro
                   t?.close();
                   t = undefined;
                 }
-                t ??= await ctx.open();
+                t ??= await connect();
                 await job.abandon(t);
               } catch (abandonErr) {
                 console.error(`정리 실패 ${job.path}: ${message(abandonErr)} - 원격 .bak 확인 필요`);
@@ -80,7 +85,12 @@ export async function runPool(ctx: Context, jobs: Job[], opts: PoolOptions): Pro
         }
       }
     } finally {
-      if (t && t !== ctx.transport) t.close();
+      if (primary) {
+        t ??= await ctx.open().catch(() => undefined);
+        if (t) ctx.transport = t;
+      } else {
+        t?.close();
+      }
     }
   };
 
@@ -92,6 +102,6 @@ export async function runPool(ctx: Context, jobs: Job[], opts: PoolOptions): Pro
   if (failed.length > 0) process.exitCode = 2;
   if (fatal) {
     const left = Math.max(0, jobs.length - next);
-    throw new Error(`인증 실패로 중단 (미처리 ${left}건): ${fatal.message}`);
+    throw new Error(`접속 중단 (미처리 ${left}건): ${fatal.message}`);
   }
 }
