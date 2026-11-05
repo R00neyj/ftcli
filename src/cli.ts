@@ -15,3 +15,21 @@ export const retriesOption = [
   1,
 ] as const;
 export const intOpt = intOption;
+
+export type RowAction = "pulled" | "pushed" | "released" | "skipped" | "failed";
+
+export interface ResultRow {
+  path: string;
+  action: RowAction;
+  reason?: string;
+}
+
+export interface StatusRow {
+  path: string;
+  state: string;
+}
+
+export const printJson = (value: unknown): void => {
+  process.stdout.write(`${JSON.stringify(value)}
+`);
+};

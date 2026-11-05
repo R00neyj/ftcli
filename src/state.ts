@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
+import { Writable } from "node:stream";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { STATE_DIR } from "./config.js";
-import type { RemoteStat } from "./transport/types.js";
+import type { RemoteStat, Transport } from "./transport/types.js";
 
 export interface BaseEntry {
   size: number;
@@ -144,4 +145,16 @@ export async function recordBase(
     sha256: local.sha256,
     pulledAt: new Date().toISOString(),
   });
+}
+
+export async function remoteSha256(t: Transport, rel: string): Promise<string> {
+  const h = createHash("sha256");
+  const sink = new Writable({
+    write(chunk: Buffer, _enc, cb) {
+      h.update(chunk);
+      cb();
+    },
+  });
+  await t.downloadToStream(rel, sink);
+  return h.digest("hex");
 }

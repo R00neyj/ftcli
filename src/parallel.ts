@@ -13,11 +13,13 @@ export interface Job {
 export interface PoolOptions {
   jobs: number;
   retries: number;
+  log?: (line: string) => void;
 }
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 export async function runPool(ctx: Context, jobs: Job[], opts: PoolOptions): Promise<void> {
+  const log = opts.log ?? console.log;
   let ok = 0;
   const failed: string[] = [];
   let next = 0;
@@ -42,7 +44,7 @@ export async function runPool(ctx: Context, jobs: Job[], opts: PoolOptions): Pro
             t ??= await ctx.open();
             await job.run(t);
             ok++;
-            console.log(job.label);
+            log(job.label);
             break;
           } catch (err) {
             if (isAuthError(err)) {
@@ -78,15 +80,15 @@ export async function runPool(ctx: Context, jobs: Job[], opts: PoolOptions): Pro
         }
       }
     } finally {
-      if (!primary) t?.close();
+      if (t && t !== ctx.transport) t.close();
     }
   };
 
   const workers = Math.max(1, Math.min(opts.jobs, jobs.length));
-  if (workers > 1) console.log(`workers : ${workers}`);
+  if (workers > 1) log(`workers : ${workers}`);
   await Promise.all(Array.from({ length: workers }, (_, i) => slot(i === 0)));
 
-  console.log(`result : ${ok} ok, ${failed.length} failed`);
+  log(`result : ${ok} ok, ${failed.length} failed`);
   if (failed.length > 0) process.exitCode = 2;
   if (fatal) {
     const left = Math.max(0, jobs.length - next);
