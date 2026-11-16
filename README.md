@@ -12,15 +12,39 @@ node dist/index.js --help   # 또는 npm run dev -- <명령>
 
 ## 설정
 
-`ftcli init` → `.ftcli/config.json` 생성 후 수정.
+`ftcli init` → `.ftcli/config.json` 생성 후 수정. 함께 생성되는 `.ftcli/.gitignore`(`*`)가 설정(평문 비밀번호 포함)·백업·인덱스를 git 커밋 대상에서 제외함.
 
 ```json
-{ "protocol": "ftp", "host": "example.com", "port": 21, "user": "user", "secure": false, "remoteRoot": "/" }
+{ "protocol": "ftp", "host": "example.com", "port": 21, "user": "user", "password": "", "secure": false, "remoteRoot": "/" }
 ```
 
 비밀번호 우선순위: `--password` → `FTPCLI_PASSWORD` 환경 변수 → `config.password`.
 
 무시 규칙: `.ftignore` 또는 `.ftpignore` (`.gitignore` 문법). `.ftcli`, `.git` 은 항상 제외.
+
+### 여러 프로젝트 일괄 설정 (`import`)
+
+담당자 문서(CSV / Markdown)에 적힌 접속 정보로 프로젝트 폴더마다 `.ftcli/config.json`(+ `.gitignore`)을 만듦. 폴더 경로는 `-C` 기준(기본: 현재 디렉터리) 상대 경로임.
+
+```sh
+ftcli import -C D:/작업물 ftp.md -n                  # 결과만 미리 보기
+ftcli import -C D:/작업물 ftp.md sites.csv notes/*.md  # 실제 생성
+ftcli import -C D:/작업물 ftp.md --host "{user}.example.com" --remote-root /www
+```
+
+읽는 형식:
+
+| 형식 | 사이트 구분 | 폴더 |
+|---|---|---|
+| CSV (`.csv`, UTF-8 / EUC-KR) | 행 하나 = 사이트 하나 | `폴더`·`프로젝트`·`사이트명` 등 열 |
+| Markdown 표 (헤더에 폴더 열 있음) | 행 하나 = 사이트 하나 | 폴더 열 |
+| Markdown 제목 섹션 | 제목 하나 = 사이트 하나. 섹션 안의 `키: 값` 줄(목록·코드 블록 포함)과 2열 표를 읽음 | 제목 텍스트. `FTP`, `접속정보`, `참고사항` 같은 하위 제목은 상위 제목을 씀 |
+
+- 키·열 이름은 별칭으로 맞춤: host(`호스트`, `서버`, `FTP 주소`), user(`아이디`, `ID`, `FTP 계정`), password(`비밀번호`, `비번`, `PW`), port(`포트`), remoteRoot(`원격경로`, `웹루트`), secure(`ftps`, `보안`). 앞에 `FTP` 가 붙어도 됨. `ftp://host:port` 형식의 host 도 읽음
+- 문서에 없는 host / port / secure / remoteRoot 는 `--host`(`{user}` 를 계정명으로 바꿈) / `--port` / `--secure` / `--remote-root` 값으로 채움
+- 건너뛰는 경우: 로컬 폴더가 없음, user·password·host 가 없음, 같은 사이트에서 같은 키의 값이 서로 다름, 같은 폴더가 두 번 이상 나옴. 실패가 하나라도 있으면 종료 코드 `2`
+- 이미 `config.json` 이 있는 폴더는 그대로 두고, `--force` 를 주면 갱신함. 이때 문서에 없는 기존 값(`maxLogins` 등)은 유지함
+- 출력에 비밀번호는 표시하지 않음
 
 ## 인증 실패 잠금
 

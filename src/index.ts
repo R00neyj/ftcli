@@ -9,6 +9,7 @@ import { ls } from "./commands/ls.js";
 import { upload } from "./commands/upload.js";
 import { jobsOption, retriesOption, type RunFn } from "./cli.js";
 import { registerCat } from "./commands/cat.js";
+import { registerImport } from "./commands/import.js";
 import { registerFind } from "./commands/find.js";
 import { registerGrep } from "./commands/grep.js";
 import { registerPull } from "./commands/pull.js";
@@ -85,6 +86,7 @@ registerCat(program, run);
 registerFind(program, run);
 registerGrep(program, run);
 registerRelease(program, run);
+registerImport(program);
 
 program.parseAsync().catch((err: Error) => {
   console.error(err.message);

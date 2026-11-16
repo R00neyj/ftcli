@@ -1,6 +1,5 @@
-import { mkdir, stat, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { STATE_DIR, configPath, configTemplate } from "../config.js";
+import { stat } from "node:fs/promises";
+import { configPath, configTemplate, writeConfig } from "../config.js";
 
 export async function init(cwd: string): Promise<void> {
   const file = configPath(cwd);
@@ -9,7 +8,6 @@ export async function init(cwd: string): Promise<void> {
     () => false,
   );
   if (exists) throw new Error(`이미 존재: ${file}`);
-  await mkdir(path.join(cwd, STATE_DIR), { recursive: true });
-  await writeFile(file, `${JSON.stringify(configTemplate, null, 2)}\n`);
+  await writeConfig(cwd, configTemplate);
   console.log(`생성: ${file}`);
 }

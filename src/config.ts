@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const STATE_DIR = ".ftcli";
@@ -19,12 +19,23 @@ export const configTemplate: Config = {
   host: "example.com",
   port: 21,
   user: "user",
+  password: "",
   secure: false,
   remoteRoot: "/",
 };
 
 export function configPath(cwd: string): string {
   return path.join(cwd, STATE_DIR, "config.json");
+}
+
+/** config.json 저장 + .ftcli/.gitignore(`*`) 보장. 평문 비밀번호·백업·인덱스가 사용자 저장소에 커밋되지 않게 함. 기존 .gitignore 는 보존 */
+export async function writeConfig(cwd: string, cfg: Config): Promise<void> {
+  const stateDir = path.join(cwd, STATE_DIR);
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(configPath(cwd), `${JSON.stringify(cfg, null, 2)}\n`);
+  await writeFile(path.join(stateDir, ".gitignore"), "*\n", { flag: "wx" }).catch((e: NodeJS.ErrnoException) => {
+    if (e.code !== "EEXIST") throw e;
+  });
 }
 
 export async function loadConfig(
