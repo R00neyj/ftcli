@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: 태그와 package.json 버전 일치 확인
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME != package.json $version"
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run typecheck
+
+      - name: tgz 생성
+        id: pack
+        run: |
+          file=$(npm pack --json | jq -r '.[0].filename')
+          cp "$file" ftcli.tgz
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+
+      - name: 전역 설치 확인
+        run: |
+          npm i -g "./${{ steps.pack.outputs.file }}"
+          ftcli --help
+
+      - name: Release 생성
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "${{ steps.pack.outputs.file }}" ftcli.tgz \
+            --verify-tag --generate-notes

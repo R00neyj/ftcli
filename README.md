@@ -2,12 +2,33 @@
 
 FTP 목록 / 로컬 diff / 업로드 / 다운로드 / 백업 CLI + 작업 집합(원격 SSOT) 모드. Node + TypeScript, 전송은 [basic-ftp](https://github.com/patrickjuchli/basic-ftp).
 
-## 설치 / 실행
+## 설치
+
+Node 20 이상 필요. [Releases](https://github.com/R00neyj/ftcli/releases) 의 tgz 로 전역 설치함.
 
 ```sh
-npm install
-npm run build
-node dist/index.js --help   # 또는 npm run dev -- <명령>
+npm i -g https://github.com/R00neyj/ftcli/releases/latest/download/ftcli.tgz           # 최신
+npm i -g https://github.com/R00neyj/ftcli/releases/download/v0.1.0/ftcli-0.1.0.tgz     # 버전 고정
+ftcli --help
+```
+
+업데이트는 같은 명령 재실행. `npm i -g github:R00neyj/ftcli` 는 npm 이 git 의존성을 전역 설치할 때 devDependencies 없이 `prepare` 를 돌려 `tsc` 를 못 찾고 실패하므로 쓰지 않음.
+
+### 개발
+
+```sh
+npm install            # prepare 가 dist 빌드
+npm link               # 전역 ftcli 를 이 폴더에 연결 (폴더 삭제 시 깨짐)
+npm run dev -- <명령>
+```
+
+### 릴리스
+
+`package.json` 의 `version` 을 올려 커밋한 뒤 같은 버전의 `v` 태그를 push 하면 GitHub Actions(`.github/workflows/release.yml`)가 typecheck → `npm pack` → 설치 확인 후 Release 에 `ftcli-<버전>.tgz` 와 `ftcli.tgz` 를 첨부함. 태그와 `version` 이 다르면 실패함.
+
+```sh
+npm version patch      # version 수정 + 커밋 + v 태그 생성
+git push --follow-tags
 ```
 
 ## 설정
