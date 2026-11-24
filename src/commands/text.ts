@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import { intOpt, jobsOption, printJson, retriesOption, type Register } from "../cli.js";
 import { mapPool, type MapOptions } from "../pmap.js";
-import { joinLines, readRemoteFile, splitLines } from "../remoteio.js";
+import { isUtf8, joinLines, readRemoteFile, splitLines } from "../remoteio.js";
 import { parseSed, runSed, SedError } from "../sed.js";
 import type { Context } from "../session.js";
 import { normalizeRel } from "../state.js";
@@ -186,9 +186,11 @@ async function sedPrint(ctx: Context, args: string[], opts: SedOpts): Promise<vo
   const cmds = parseSed(scripts, Boolean(opts.regexpExtended));
   if (files.length === 0) throw new SedError("대상 원격 파일 없음 (표준 입력은 지원하지 않음)");
   for (const { buf } of await readAll(ctx, files, opts)) {
-    const { lines, trailingNewline } = splitLines(buf.toString("utf8"));
+    // UTF-8 이 아닌 파일(EUC-KR 등)은 latin1 로 1바이트씩 다뤄 출력 바이트를 보존함 (ASCII 패턴만 정확히 맞음)
+    const enc: BufferEncoding = isUtf8(buf) ? "utf8" : "latin1";
+    const { lines, trailingNewline } = splitLines(buf.toString(enc));
     const { out, endsAtLastLine } = runSed(cmds, lines, Boolean(opts.quiet));
-    write(joinLines(out, trailingNewline || !endsAtLastLine));
+    process.stdout.write(Buffer.from(joinLines(out, trailingNewline || !endsAtLastLine), enc));
   }
 }
 

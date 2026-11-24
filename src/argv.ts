@@ -10,6 +10,25 @@
 /** 값을 받는 전역 옵션 (공백으로 값 분리 시 다음 인자를 건너뜀) */
 const GLOBAL_WITH_VALUE = new Set(["-C", "--cwd", "--password"]);
 
+/** grep 에서 값을 받는 옵션 (공백으로 값 분리 시 다음 인자는 재작성하지 않음) */
+const GREP_WITH_VALUE = new Set([
+  "-e",
+  "--regexp",
+  "-A",
+  "-B",
+  "-m",
+  "-g",
+  "--glob",
+  "--include",
+  "--exclude",
+  "--exclude-dir",
+  "--max-size",
+  "--context",
+  "-j",
+  "--jobs",
+  "--retries",
+]);
+
 const ALIASES: Record<string, string> = {
   rg: "grep",
 };
@@ -58,6 +77,12 @@ function rewriteFor(cmd: string, rest: string[]): string[] {
         continue;
       }
     } else if (cmd === "grep") {
+      // 값을 받는 옵션은 값(다음 인자)을 그대로 통과 (예: -e -C)
+      if (GREP_WITH_VALUE.has(a) && i + 1 < rest.length) {
+        out.push(a, rest[i + 1] as string);
+        i++;
+        continue;
+      }
       if (a === "-C") {
         out.push("--context");
         continue;
@@ -69,8 +94,9 @@ function rewriteFor(cmd: string, rest: string[]): string[] {
       }
     } else if (cmd === "sed") {
       // macOS sed 습관: -i '' (백업 접미사 없음) 의 빈 인자는 버림
-      if (a === "-i" && rest[i + 1] === "") {
-        out.push("-i");
+      // -Ei '' / -ni '' 처럼 짧은 옵션 묶음의 끝이 i 인 경우도 포함
+      if (/^-[A-Za-z]*i$/.test(a) && rest[i + 1] === "") {
+        out.push(a);
         i++;
         continue;
       }

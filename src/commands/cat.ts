@@ -4,7 +4,7 @@ import type { Register } from "../cli.js";
 import type { Context } from "../session.js";
 import { normalizeRel } from "../state.js";
 import { mapPool } from "../pmap.js";
-import { readRemoteFile, splitLines } from "../remoteio.js";
+import { readRemoteFile } from "../remoteio.js";
 import type { Transport } from "../transport/types.js";
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -135,18 +135,39 @@ async function catNumbered(ctx: Context, paths: string[], opts: CatOpts): Promis
       process.exitCode = 2;
     }
   }
-  const results = await mapPool(ctx, rels, { jobs: 4, retries: 1 }, (t, rel) => readRemoteFile(t, rel, opts.forceLarge));
-  let n = 0;
+  // 한 연결로 차례대로 받음 (추가 로그인이 530 으로 거부되면 인증 실패로 기록돼 계정이 잠길 수 있음)
+  const results = await mapPool(ctx, rels, { jobs: 1, retries: 1 }, (t, rel) => readRemoteFile(t, rel, opts.forceLarge));
+  const state = { n: 0, atLineStart: true };
   results.forEach((r, i) => {
     if (!r.ok) {
       console.error(`실패 ${rels[i]}: ${r.error.message}`);
       process.exitCode = 2;
       return;
     }
-    const { lines, trailingNewline } = splitLines(r.value.toString("utf8"));
-    const out = lines.map((l) => `${String(++n).padStart(6)}\t${l}`);
-    process.stdout.write(out.join("\n") + (out.length > 0 && trailingNewline ? "\n" : ""));
+    process.stdout.write(numberLines(r.value, state));
   });
+}
+
+/**
+ * 바이트 그대로 줄 번호를 붙임 (UTF-8 이 아닌 파일도 깨지지 않게 0x0a 기준으로 나눔).
+ * 앞 파일이 줄바꿈 없이 끝나면 다음 파일 첫 줄은 번호 없이 이어 붙임 (GNU cat -n 과 같음)
+ */
+export function numberLines(buf: Buffer, state: { n: number; atLineStart: boolean }): Buffer {
+  const parts: Buffer[] = [];
+  let pos = 0;
+  while (pos < buf.length) {
+    if (state.atLineStart) parts.push(Buffer.from(`${String(++state.n).padStart(6)}\t`));
+    const nl = buf.indexOf(0x0a, pos);
+    if (nl < 0) {
+      parts.push(buf.subarray(pos));
+      state.atLineStart = false;
+      break;
+    }
+    parts.push(buf.subarray(pos, nl + 1));
+    state.atLineStart = true;
+    pos = nl + 1;
+  }
+  return Buffer.concat(parts);
 }
 
 export const registerCat: Register = (program, run) => {

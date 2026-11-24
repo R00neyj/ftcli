@@ -66,6 +66,18 @@ export async function readRemoteFile(t: Transport, rel: string, forceLarge = fal
   }
 }
 
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
+
+/** UTF-8 로 올바르게 해석되는지 (EUC-KR/CP949 등은 false). utf8 로 디코딩 후 다시 인코딩해도 바이트가 그대로인지 판단용 */
+export function isUtf8(buf: Buffer): boolean {
+  try {
+    strictUtf8.decode(buf);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** 줄 단위 처리용 분할. 마지막 줄바꿈 유무를 보존해 join 시 원래 형태로 되돌릴 수 있게 함 */
 export function splitLines(text: string): { lines: string[]; trailingNewline: boolean } {
   if (text === "") return { lines: [], trailingNewline: false };

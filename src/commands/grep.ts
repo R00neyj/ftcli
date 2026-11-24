@@ -26,6 +26,8 @@ interface GrepOpts {
   retries: number;
   json?: boolean;
   refresh?: boolean;
+  /** -h(--no-filename) 이면 false */
+  filename: boolean;
 }
 
 interface Match {
@@ -107,6 +109,22 @@ export function scan(rel: string, buf: Buffer, test: (line: string) => boolean, 
   return { binary: false, matches, rows };
 }
 
+/**
+ * --exclude-dir 판정. 끝의 / 는 무시함 (lib/ = lib).
+ * / 가 들어간 패턴(wp-content/uploads)은 파일 경로의 상위 디렉터리 누적 경로(a, a/b, a/b/c ...)와 비교하고,
+ * / 가 없는 패턴은 디렉터리 이름 하나하나와 비교함
+ */
+export function excludedDir(patterns: string[], filePath: string): boolean {
+  if (patterns.length === 0) return false;
+  const segs = filePath.split("/").slice(0, -1);
+  const prefixes = segs.map((_, i) => segs.slice(0, i + 1).join("/"));
+  return patterns.some((raw) => {
+    const g = raw.replace(/\/+$/, "");
+    if (g === "") return false;
+    return g.includes("/") ? prefixes.some((d) => matchGlob(g, d)) : segs.some((d) => matchGlob(g, d));
+  });
+}
+
 async function grep(ctx: Context, pattern: string | undefined, pathArgs: string[], opts: GrepOpts): Promise<void> {
   // -e 를 쓰면 첫 위치 인자도 경로임
   const patterns = opts.regexp.length > 0 ? opts.regexp : pattern !== undefined ? [pattern] : [];
@@ -116,12 +134,13 @@ async function grep(ctx: Context, pattern: string | undefined, pathArgs: string[
   const prefixes = pathArgs.map(normalizeRel);
   const index = await loadIndexFile(ctx, { refresh: opts.refresh });
   if (!opts.refresh) warnIfStale(index);
-  const include = [...opts.glob, ...opts.include];
-  const dirOf = (p: string): string[] => p.split("/").slice(0, -1);
+  // rg -g '!*.min.js' 처럼 ! 로 시작하는 --glob 은 제외 패턴
+  const include = [...opts.glob.filter((g) => !g.startsWith("!")), ...opts.include];
+  const exclude = [...opts.glob.filter((g) => g.startsWith("!")).map((g) => g.slice(1)), ...opts.exclude];
   const globOk = (p: string): boolean =>
     (include.length === 0 || include.some((g) => matchGlob(g, p))) &&
-    !opts.exclude.some((g) => matchGlob(g, p)) &&
-    !opts.excludeDir.some((g) => dirOf(p).some((d) => matchGlob(g, d)));
+    !exclude.some((g) => matchGlob(g, p)) &&
+    !excludedDir(opts.excludeDir, p);
   const entries: IndexEntry[] = index.entries.filter(
     (e) => (prefixes.length === 0 || prefixes.some((d) => underDir(d, e.path))) && globOk(e.path),
   );
@@ -177,7 +196,7 @@ async function grep(ctx: Context, pattern: string | undefined, pathArgs: string[
   if (opts.count) {
     const counts = [...perFile].sort((a, b) => (a[0] < b[0] ? -1 : 1));
     if (opts.json) printJson(counts.map(([path, count]) => ({ path, count })));
-    else for (const [path, count] of counts) console.log(`${path}:${count}`);
+    else for (const [path, count] of counts) console.log(opts.filename ? `${path}:${count}` : String(count));
   } else if (opts.filesWithMatches) {
     const files = [...new Set(matches.map((m) => m.path))];
     if (opts.json) printJson(files);
@@ -190,7 +209,8 @@ async function grep(ctx: Context, pattern: string | undefined, pathArgs: string[
     for (const [path, rows] of [...rowsByFile].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
       for (const r of rows) {
         if (withContext && prev && (prev.path !== path || r.line > prev.line + 1)) console.log("--");
-        console.log(`${path}${r.match ? ":" : "-"}${r.line}${r.match ? ":" : "-"}${r.text}`);
+        const sep = r.match ? ":" : "-";
+        console.log(`${opts.filename ? `${path}${sep}` : ""}${r.line}${sep}${r.text}`);
         prev = { path, line: r.line };
       }
     }
@@ -226,12 +246,15 @@ export const registerGrep: Register = (program, run) => {
     .option("-n, --line-number", "호환용 (줄 번호는 항상 출력)")
     .option("-r, --recursive", "호환용 (경로를 주면 항상 하위까지 검색)")
     .option("-R", "호환용 (-r 과 같음)")
-    .option("-H, --with-filename", "호환용 (파일 경로는 항상 출력)")
+    // grep -rh 처럼 -h 를 붙여 쓰는 습관 때문에 도움말은 --help 만 사용
+    .helpOption("--help", "display help for command")
+    .option("-H, --with-filename", "호환용 (기본으로 파일 경로 출력)")
+    .option("-h, --no-filename", "텍스트 출력에서 파일 경로 생략 (`줄:내용`)")
     .option("-e, --regexp <pattern>", "검색 패턴 (반복 가능, 하나라도 맞으면 일치)", collect, [] as string[])
-    .option("-g, --glob <g>", "후보 파일 glob 필터 (반복 가능)", collect, [] as string[])
+    .option("-g, --glob <g>", "후보 파일 glob 필터 (반복 가능, !로 시작하면 제외: -g '!*.min.js')", collect, [] as string[])
     .option("--include <g>", "후보 파일 glob 필터 (--glob 과 같음, 반복 가능)", collect, [] as string[])
     .option("--exclude <g>", "제외할 파일 glob (반복 가능)", collect, [] as string[])
-    .option("--exclude-dir <g>", "제외할 디렉터리 이름 glob (반복 가능)", collect, [] as string[])
+    .option("--exclude-dir <g>", "제외할 디렉터리 glob. 이름(node_modules) 또는 경로(wp-content/uploads), 끝의 / 무시 (반복 가능)", collect, [] as string[])
     .option("-I", "호환용 (바이너리 파일은 항상 건너뜀)")
     .option("--max-size <bytes>", "이보다 큰 파일은 건너뜀", intOpt(1, Number.MAX_SAFE_INTEGER), 1048576)
     .option("-l, --files-with-matches", "일치한 파일 경로만 출력")
@@ -240,7 +263,9 @@ export const registerGrep: Register = (program, run) => {
     .option(...retriesOption)
     .option("--json", "JSON 출력")
     .option("--refresh", "검색 전 인덱스 재구축")
-    .action((pattern: string | undefined, paths: string[], opts: GrepOpts, cmd) =>
-      run(cmd, (ctx) => grep(ctx, pattern, paths, opts)),
-    );
+    .action((pattern: string | undefined, paths: string[], opts: GrepOpts, cmd) => {
+      // 접속 전에 먼저 검사 (패턴 없이 FTP 로그인하지 않도록)
+      if (pattern === undefined && (opts.regexp ?? []).length === 0) throw new Error("검색 패턴 없음");
+      return run(cmd, (ctx) => grep(ctx, pattern, paths, opts));
+    });
 };

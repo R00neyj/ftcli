@@ -3,7 +3,7 @@ import { jobsOption, printJson, retriesOption, type Register, type ResultRow } f
 import { patchIndex, type IndexOp } from "../indexer.js";
 import { runPool, type Job } from "../parallel.js";
 import { findEntry, hasUnpushedEdits, message, parentOf } from "../remote-ops.js";
-import { isBinary, joinLines, readRemoteFile, splitLines } from "../remoteio.js";
+import { isBinary, isUtf8, joinLines, readRemoteFile, splitLines } from "../remoteio.js";
 import { parseSed, runSed } from "../sed.js";
 import type { Context } from "../session.js";
 import { normalizeRel, WorkSet } from "../state.js";
@@ -64,7 +64,7 @@ async function applyWrites(
         indexOps.push({ op: "add", entry: { path: p.rel, size: p.content.length } });
         if (dirty.has(p.rel)) {
           console.error(
-            `작업 집합 파일 ${p.rel}: 로컬 수정과 원격 변경이 충돌함(status C). pull --force 는 로컬 수정을 버리므로, 필요한 로컬 수정은 먼저 옮겨 둘 것`,
+            `작업 집합 파일 ${p.rel}: 로컬 수정과 원격 변경이 충돌함(status C). pull --force 시 로컬 수정은 .ftcli/backups/ 에 백업된 뒤 덮어써짐(--no-backup 이면 버려짐)`,
           );
         } else if (ws.get(p.rel)) {
           console.error(`작업 집합 파일 ${p.rel}: 원격이 바뀌었으므로 pull 로 로컬 사본을 다시 받을 것`);
@@ -190,6 +190,11 @@ export async function sedInPlace(ctx: Context, scripts: string[], files: string[
       const buf = await readRemoteFile(ctx.transport, rel, opts.forceLarge);
       if (isBinary(buf)) {
         fail(rel, "바이너리 파일로 보여 수정하지 않음");
+        continue;
+      }
+      // utf8 로 풀었다 다시 쓰면 EUC-KR 등 다른 인코딩의 바이트가 모두 깨지므로 거부함
+      if (!isUtf8(buf)) {
+        fail(rel, "UTF-8 이 아닌 파일은 수정하지 않음 (EUC-KR 등은 pull 후 로컬에서 수정해 push)");
         continue;
       }
       const text = buf.toString("utf8");

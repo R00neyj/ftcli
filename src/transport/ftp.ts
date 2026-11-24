@@ -27,7 +27,7 @@ export class FtpTransport implements Transport {
       for (const item of await this.client.list(this.abs(rel))) {
         const itemRel = posix.join(rel, item.name);
         if (item.isDirectory) {
-          out.push({ path: itemRel, size: 0, isDir: true });
+          out.push({ path: itemRel, size: 0, isDir: true, mtime: item.modifiedAt?.toISOString() });
           if (recursive) await walk(itemRel);
         } else if (item.isFile) {
           out.push({
