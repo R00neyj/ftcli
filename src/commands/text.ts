@@ -5,6 +5,7 @@ import { joinLines, readRemoteFile, splitLines } from "../remoteio.js";
 import { parseSed, runSed, SedError } from "../sed.js";
 import type { Context } from "../session.js";
 import { normalizeRel } from "../state.js";
+import { sedInPlace, type SedInPlaceOpts } from "./write.js";
 
 interface ReadOpts extends MapOptions {
   forceLarge?: boolean;
@@ -244,12 +245,21 @@ export const registerText: Register = (program, run) => {
       .option("-n, --quiet", "자동 출력 끔 (p 로 지정한 줄만 출력)")
       .option("-e, --expression <script>", "스크립트 (반복 가능)", collect, [] as string[])
       .option("-E, --regexp-extended", "확장 정규식(ERE) 사용")
-      .option("-r", "-E 와 같음"),
-  ).action((args: string[], opts: SedOpts & { r?: boolean }, cmd: Command) => {
+      .option("-r", "-E 와 같음")
+      .option("-i, --in-place", "원격 파일을 직접 수정 (덮어쓰기 전 원격 .bak 생성, -i.bak 형식도 가능)")
+      .option("--no-backup", "-i 시 원격 .bak 생성 안 함")
+      .option("-f, --force", "-i 시 작업 집합 파일에 push 안 한 로컬 수정이 있어도 진행")
+      .option("--dry-run", "-i 시 바뀔 파일과 줄 수만 출력")
+      .option("--json", "-i 시 JSON 결과 출력"),
+  ).action((args: string[], opts: SedOpts & SedInPlaceOpts & { r?: boolean; inPlace?: boolean }, cmd: Command) => {
     if (opts.r) opts.regexpExtended = true;
     // 스크립트 오류는 접속 전에 알림
-    const { scripts } = splitSedArgs(args, opts);
+    const { scripts, files } = splitSedArgs(args, opts);
     parseSed(scripts, Boolean(opts.regexpExtended));
+    if (opts.inPlace) {
+      if (files.length === 0) throw new SedError("대상 원격 파일 없음");
+      return run(cmd, (ctx) => sedInPlace(ctx, scripts, files, opts));
+    }
     return run(cmd, (ctx) => sedPrint(ctx, args, opts));
   });
 };

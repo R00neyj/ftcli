@@ -155,10 +155,25 @@ ftcli release
 | `cp [-r/-R] [-n] [-f] [--no-backup] <원본...> <대상>` (별칭 `copy`) | 복사. FTP 에 복사 명령이 없어 임시 파일로 받아 다시 올림(크기 검증). 덮어쓰는 대상 파일은 `.bak` 보관 |
 | `touch [-c] <경로...>` | 없는 파일을 빈 파일로 생성. 이미 있으면 그대로 둠 |
 | `chmod [-R] <모드> <경로...>` | `SITE CHMOD`. 숫자 모드(644, 755)만, 서버가 지원하지 않으면 오류 |
+| `tee [-a] [-q] [-f] [--no-backup] <경로...>` | 표준 입력을 원격 파일에 저장하고 stdout 으로도 출력. heredoc 으로 파일 쓰기 대용 |
+| `sed -i [--dry-run] [-f] [--no-backup] <스크립트> <경로...>` | 원격 파일 직접 수정. `-i.bak` 형식도 받음(백업 이름은 항상 `<경로>.bak`). 바뀐 내용이 없으면 올리지 않음 |
+
+```sh
+ftcli tee wp-content/themes/x/notice.html <<'EOF'
+<p>점검 중</p>
+EOF
+ftcli sed -i --dry-run 's/http:\/\/old\.com/https:\/\/new.com/g' wp-config.php
+ftcli sed -i 's|http://old.com|https://new.com|g' wp-config.php
+```
+
+- `tee`, `sed -i` 는 덮어쓰기 전 원격 `.bak` 생성, 업로드 후 크기 검증, 실패 시 `.bak` 으로 복원함.
+- 작업 집합 파일에 push 안 한 로컬 수정이 있으면 거부(`-f` 로 무시). 덮어쓴 작업 집합 파일은 원격이 바뀐 상태(`status` 의 R)가 되므로 `pull --force` 로 다시 받음.
+- `tee` 는 입력이 비어 있는데 기존 파일에 내용이 있으면 거부함(에이전트 셸이 stdin 을 비워 둔 채 실행해 파일을 지우는 것 방지). 의도한 것이면 `-f`.
+- `sed -i` 는 바이너리 파일(앞부분에 NUL 바이트)을 거부함. CRLF 줄바꿈과 마지막 줄바꿈 유무는 그대로 유지함.
 
 - `mv` 는 작업 집합 파일을 옮기면 `state.json` 에서 제거함(새 경로는 다시 `pull`). 옮기거나 덮어쓸 작업 집합 파일에 push 안 한 로컬 수정이 있으면 거부(`-f` 로 무시). `cp` 도 덮어쓸 대상에 같은 검사를 함.
 - `touch` 는 기존 파일의 수정 시각을 바꾸지 않음. 바꾸면 작업 집합 `status` 가 원격 변경(R)으로 나와 `push` 가 거부되기 때문임.
-- `rm`, `mv`, `cp`, `touch` 는 `.ftcli/index.json` 이 있으면 결과에 맞게 고쳐 둠. `find` / `grep` 을 바로 이어 써도 됨.
+- `rm`, `mv`, `cp`, `touch`, `tee`, `sed -i` 는 `.ftcli/index.json` 이 있으면 결과에 맞게 고쳐 둠. `find` / `grep` 을 바로 이어 써도 됨.
 
 - `grep -C n` 은 전역 옵션 `-C`(작업 디렉터리)와 겹치지 않게 내부에서 `--context n` 으로 바꿔 처리함. 작업 디렉터리 `-C` 는 하위 명령 앞에 둠 (`ftcli -C site grep -C 2 foo`).
 - `find -type d` 는 인덱스의 파일 경로에서 유추하므로 빈 디렉터리는 나오지 않음.
