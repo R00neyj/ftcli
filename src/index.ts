@@ -17,6 +17,10 @@ import { registerPush } from "./commands/push.js";
 import { registerRelease } from "./commands/release.js";
 import { registerRm } from "./commands/rm.js";
 import { registerStatus } from "./commands/status.js";
+import { registerInfo } from "./commands/info.js";
+import { registerText } from "./commands/text.js";
+import { rewriteArgv } from "./argv.js";
+import { ignoreStdoutEpipe } from "./remoteio.js";
 import { withContext, type GlobalOpts } from "./session.js";
 
 const program = new Command();
@@ -43,8 +47,13 @@ program
   .description("원격 목록")
   .argument("[dir]", "원격 경로", "")
   .option("-r, --recursive", "하위 포함")
+  .option("-R", "-r 과 같음")
+  .option("-l", "호환용 (항상 종류·크기 표시)")
+  .option("-a, --all", "호환용 (숨김 파일도 항상 표시)")
   .option("--json", "JSON 출력")
-  .action((dir: string, opts, cmd: Command) => run(cmd, (ctx) => ls(ctx, dir, opts)));
+  .action((dir: string, opts: { recursive?: boolean; R?: boolean; json?: boolean }, cmd: Command) =>
+    run(cmd, (ctx) => ls(ctx, dir, { recursive: opts.recursive || opts.R, json: opts.json })),
+  );
 
 program
   .command("diff")
@@ -86,12 +95,15 @@ registerStatus(program, run);
 registerPush(program, run);
 registerRm(program, run);
 registerCat(program, run);
+registerText(program, run);
+registerInfo(program, run);
 registerFind(program, run);
 registerGrep(program, run);
 registerRelease(program, run);
 registerImport(program);
 
-program.parseAsync().catch((err: Error) => {
+ignoreStdoutEpipe();
+program.parseAsync(rewriteArgv(process.argv.slice(2)), { from: "user" }).catch((err: Error) => {
   console.error(err.message);
   process.exitCode = 1;
 });

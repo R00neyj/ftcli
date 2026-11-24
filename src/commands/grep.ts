@@ -1,13 +1,19 @@
-import { Writable } from "node:stream";
 import { intOpt, jobsOption, printJson, retriesOption, type Register } from "../cli.js";
 import { loadIndexFile, matchGlob, underDir, userRegExp, warnIfStale, type IndexEntry } from "../indexer.js";
 import { mapPool } from "../pmap.js";
 import type { Context } from "../session.js";
+import { fetchBuffer, isBinary, SizeExceededError } from "../remoteio.js";
 import { normalizeRel } from "../state.js";
 
 interface GrepOpts {
   fixed?: boolean;
   ignoreCase?: boolean;
+  wordRegexp?: boolean;
+  invertMatch?: boolean;
+  count?: boolean;
+  context?: number;
+  afterContext?: number;
+  beforeContext?: number;
   glob: string[];
   maxSize: number;
   filesWithMatches?: boolean;
@@ -22,70 +28,72 @@ interface Match {
   path: string;
   line: number;
   text: string;
+  /** -A/-B/-C 사용 시에만 포함 */
+  before?: string[];
+  after?: string[];
 }
 
-type FileResult = { binary: true } | { binary: false; matches: Match[] };
+/** 텍스트 출력용 행. match=false 는 문맥 줄 */
+interface OutRow {
+  line: number;
+  text: string;
+  match: boolean;
+}
 
-const BINARY_PROBE = 8192;
+type FileResult = { binary: true } | { binary: false; matches: Match[]; rows: OutRow[] };
 
-function lineMatcher(pattern: string, opts: GrepOpts): (line: string) => boolean {
-  if (!opts.fixed) {
-    const re = userRegExp(pattern, opts.ignoreCase ? "i" : "");
-    return (line) => re.test(line);
+const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export function lineMatcher(pattern: string, opts: GrepOpts): (line: string) => boolean {
+  const flags = opts.ignoreCase ? "i" : "";
+  let test: (line: string) => boolean;
+  if (opts.wordRegexp) {
+    const src = opts.fixed ? escapeRegex(pattern) : pattern;
+    const re = userRegExp(`(?<!\\w)(?:${src})(?!\\w)`, flags);
+    test = (line) => re.test(line);
+  } else if (!opts.fixed) {
+    const re = userRegExp(pattern, flags);
+    test = (line) => re.test(line);
+  } else if (!opts.ignoreCase) {
+    test = (line) => line.includes(pattern);
+  } else {
+    const needle = pattern.toLowerCase();
+    test = (line) => line.toLowerCase().includes(needle);
   }
-  if (!opts.ignoreCase) return (line) => line.includes(pattern);
-  const needle = pattern.toLowerCase();
-  return (line) => line.toLowerCase().includes(needle);
+  return opts.invertMatch ? (line) => !test(line) : test;
 }
 
-class SizeExceededError extends Error {
-  readonly discardConnection = true;
-
-  constructor(maxSize: number) {
-    super(`크기 초과(인덱스 오래됨): ${maxSize}바이트 한도 넘음`);
-  }
-}
-
-async function fetchBuffer(
-  download: (dest: Writable) => Promise<void>,
-  maxSize: number,
-): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let total = 0;
-  let exceeded = false;
-  const sink = new Writable({
-    write(chunk: Buffer, _enc, cb) {
-      total += chunk.length;
-      if (total > maxSize) {
-        exceeded = true;
-        cb(new SizeExceededError(maxSize));
-        return;
-      }
-      chunks.push(chunk);
-      cb();
-    },
-  });
-  try {
-    await download(sink);
-  } catch (err) {
-    if (exceeded) throw new SizeExceededError(maxSize);
-    throw err;
-  }
-  if (exceeded) throw new SizeExceededError(maxSize);
-  return Buffer.concat(chunks);
-}
-
-function scan(rel: string, buf: Buffer, test: (line: string) => boolean, opts: GrepOpts): FileResult {
-  if (buf.subarray(0, BINARY_PROBE).includes(0)) return { binary: true };
+export function scan(rel: string, buf: Buffer, test: (line: string) => boolean, opts: GrepOpts): FileResult {
+  if (isBinary(buf)) return { binary: true };
   const lines = buf.toString("utf8").split(/\r?\n/);
   if (lines.at(-1) === "") lines.pop();
   const limit = opts.filesWithMatches ? 1 : (opts.maxCount ?? Number.POSITIVE_INFINITY);
+  const after = opts.afterContext ?? opts.context ?? 0;
+  const before = opts.beforeContext ?? opts.context ?? 0;
+  const withContext = !opts.filesWithMatches && !opts.count && (after > 0 || before > 0);
   const matches: Match[] = [];
+  const printed = new Map<number, boolean>();
   for (let i = 0; i < lines.length && matches.length < limit; i++) {
     const text = lines[i] as string;
-    if (test(text)) matches.push({ path: rel, line: i + 1, text });
+    if (!test(text)) continue;
+    const m: Match = { path: rel, line: i + 1, text };
+    if (withContext) {
+      const from = Math.max(0, i - before);
+      const to = Math.min(lines.length - 1, i + after);
+      m.before = lines.slice(from, i);
+      m.after = lines.slice(i + 1, to + 1);
+      for (let j = from; j <= to; j++) if (!printed.get(j)) printed.set(j, j === i);
+    } else {
+      printed.set(i, true);
+    }
+    matches.push(m);
   }
-  return { binary: false, matches };
+  // 앞 매치의 문맥 줄로 먼저 들어간 줄이 뒤에서 매치가 된 경우 반영
+  for (const m of matches) printed.set(m.line - 1, true);
+  const rows = [...printed]
+    .sort((a, b) => a[0] - b[0])
+    .map(([i, match]) => ({ line: i + 1, text: lines[i] as string, match }));
+  return { binary: false, matches, rows };
 }
 
 async function grep(ctx: Context, pattern: string, pathArgs: string[], opts: GrepOpts): Promise<void> {
@@ -125,6 +133,8 @@ async function grep(ctx: Context, pattern: string, pathArgs: string[], opts: Gre
   );
 
   const matches: Match[] = [];
+  const perFile = new Map<string, number>();
+  const rowsByFile = new Map<string, OutRow[]>();
   let binary = 0;
   let failed = 0;
   let grew = 0;
@@ -136,18 +146,34 @@ async function grep(ctx: Context, pattern: string, pathArgs: string[], opts: Gre
       failed++;
       console.error(`실패 ${rel}: ${r.error.message}`);
     } else if (r.value.binary) binary++;
-    else matches.push(...r.value.matches);
+    else {
+      matches.push(...r.value.matches);
+      perFile.set(rel, r.value.matches.length);
+      if (r.value.rows.length > 0) rowsByFile.set(rel, r.value.rows);
+    }
   });
   matches.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : a.line - b.line));
 
-  if (opts.filesWithMatches) {
+  if (opts.count) {
+    const counts = [...perFile].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    if (opts.json) printJson(counts.map(([path, count]) => ({ path, count })));
+    else for (const [path, count] of counts) console.log(`${path}:${count}`);
+  } else if (opts.filesWithMatches) {
     const files = [...new Set(matches.map((m) => m.path))];
     if (opts.json) printJson(files);
     else for (const f of files) console.log(f);
   } else if (opts.json) {
     printJson(matches);
   } else {
-    for (const m of matches) console.log(`${m.path}:${m.line}:${m.text}`);
+    const withContext = (opts.afterContext ?? opts.context ?? 0) > 0 || (opts.beforeContext ?? opts.context ?? 0) > 0;
+    let prev: { path: string; line: number } | undefined;
+    for (const [path, rows] of [...rowsByFile].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+      for (const r of rows) {
+        if (withContext && prev && (prev.path !== path || r.line > prev.line + 1)) console.log("--");
+        console.log(`${path}${r.match ? ":" : "-"}${r.line}${r.match ? ":" : "-"}${r.text}`);
+        prev = { path, line: r.line };
+      }
+    }
   }
 
   if (binary > 0) console.error(`바이너리로 판단해 ${binary}개 파일 건너뜀`);
@@ -164,12 +190,24 @@ const collect = (v: string, prev: string[]): string[] => [...prev, v];
 export const registerGrep: Register = (program, run) => {
   program
     .command("grep")
-    .description("원격 파일 내용 검색 (디스크 저장 없이 메모리로 받아 검색)")
+    .alias("rg")
+    .description("원격 파일 내용 검색 (디스크 저장 없이 메모리로 받아 검색). 출력은 grep -n 형식 `경로:줄:내용`")
     .argument("<pattern>", "정규식 (기본) 또는 고정 문자열 (-F)")
     .argument("[paths...]", "검색 범위 원격 경로 (생략 시 전체)")
     .option("-F, --fixed", "패턴을 고정 문자열로 해석")
     .option("-i, --ignore-case", "대소문자 무시")
-    .option("--glob <g>", "후보 파일 glob 필터 (반복 가능)", collect, [] as string[])
+    .option("-w, --word-regexp", "단어 단위로 일치")
+    .option("-v, --invert-match", "일치하지 않는 줄 출력")
+    .option("-c, --count", "파일별 일치 줄 수만 출력")
+    .option("-A, --after-context <n>", "일치 줄 뒤 n줄 함께 출력", intOpt(0, 1000))
+    .option("-B, --before-context <n>", "일치 줄 앞 n줄 함께 출력", intOpt(0, 1000))
+    .option("--context <n>", "일치 줄 앞뒤 n줄 함께 출력 (grep -C n 도 이 옵션으로 처리)", intOpt(0, 1000))
+    .option("-E, --extended-regexp", "호환용 (패턴은 항상 JavaScript 정규식)")
+    .option("-n, --line-number", "호환용 (줄 번호는 항상 출력)")
+    .option("-r, --recursive", "호환용 (경로를 주면 항상 하위까지 검색)")
+    .option("-R", "호환용 (-r 과 같음)")
+    .option("-H, --with-filename", "호환용 (파일 경로는 항상 출력)")
+    .option("-g, --glob <g>", "후보 파일 glob 필터 (반복 가능)", collect, [] as string[])
     .option("--max-size <bytes>", "이보다 큰 파일은 건너뜀", intOpt(1, Number.MAX_SAFE_INTEGER), 1048576)
     .option("-l, --files-with-matches", "일치한 파일 경로만 출력")
     .option("-m, --max-count <n>", "파일당 최대 일치 수", intOpt(1, Number.MAX_SAFE_INTEGER))

@@ -107,8 +107,8 @@ ftcli import -C D:/작업물 ftp.md --host "{user}.example.com" --remote-root /w
 
 | 명령 | 설명 |
 |---|---|
-| `find <패턴>` / `index` | 원격 경로 검색용 캐시(`.ftcli/index.json`) 구축·조회. glob(`**`,`*`,`?`) / 부분 문자열 / `--regex` |
-| `grep <패턴> [경로...]` | 원격 내용 검색. 디스크 저장 없이 메모리로 받아 검색. `-F -i --glob --max-size -l -m` |
+| `find <패턴>` / `index` | 원격 경로 검색용 캐시(`.ftcli/index.json`) 구축·조회. glob(`**`,`*`,`?`) / 부분 문자열 / `--regex`. bash 식 `find [경로...] -name/-iname/-path/-type/-maxdepth` 도 가능 |
+| `grep <패턴> [경로...]` (별칭 `rg`) | 원격 내용 검색. 디스크 저장 없이 메모리로 받아 검색. `-F -i -w -v -c -l -m -A -B -C -g/--glob --max-size` |
 | `cat <경로...>` (별칭 `type`) | 다운로드 없이 stdout 출력 (5MB 초과는 `--force-large`) |
 | `pull <경로...>` | 선택한 파일/디렉터리만 받고 base 기록. 로컬 수정분은 `--force` 없이는 보호 |
 | `status [경로...]` | 작업 집합 상태. `M` 로컬 수정 / `R` 원격 변경 / `C` 충돌 / `!` 로컬 없음 / `D` 원격 삭제. 전체 LIST 없이 파일별 SIZE/MDTM 만 조회 |
@@ -134,6 +134,25 @@ ftcli release
 - 원격 `.bak` 은 1세대, `push` 는 파일 단위 가드(원자적 다중 파일 트랜잭션 아님).
 - `grep` 은 FTP 에 서버측 검색이 없어 후보 파일을 모두 내려받아 검사하므로 `paths`/`--glob` 로 좁히는 편이 좋음.
 - 인덱스는 `ftcli index` / `find --refresh` 시점의 스냅샷.
+
+## bash 식 명령 (에이전트용)
+
+에이전트가 셸에서 쓰던 습관대로 원격을 다룰 수 있게 같은 이름·옵션을 지원함. 파일 내용은 메모리로 받아 처리하며 5MB 초과 파일은 `--force-large` 필요.
+
+| 명령 | 설명 |
+|---|---|
+| `ls [dir] [-r/-R] [-l] [-a]` | 원격 목록. `-l` `-a` 는 호환용(항상 상세·숨김 포함) |
+| `tree [dir] [-L n] [-d] [-a]` | 디렉터리 트리 |
+| `head [-n N / -N] [-c N] <경로...>` | 앞부분 (기본 10줄) |
+| `tail [-n N / -n +N / -N] [-c N] <경로...>` | 끝부분, `+N` 은 N번째 줄부터 |
+| `wc [-l -w -c -m] <경로...>` | 줄·단어·바이트·문자 수 |
+| `sed [-n] [-E/-r] [-e 스크립트]... <스크립트> <경로...>` | 결과를 stdout 으로 출력. 명령 `p d q s///[gIp]`, 주소 `N` `$` `/re/` `a,b` `!`. 기본 BRE, `-E` 는 ERE |
+| `stat <경로...>` | 종류·크기·수정 시각 |
+| `pwd` | `remoteRoot` 출력 (접속 안 함) |
+| `grep` / `rg`, `find`, `cat` | 위 작업 집합 모드 표 참고. `grep -n -r -R -H -E` 는 호환용으로 받기만 함 |
+
+- `grep -C n` 은 전역 옵션 `-C`(작업 디렉터리)와 겹치지 않게 내부에서 `--context n` 으로 바꿔 처리함. 작업 디렉터리 `-C` 는 하위 명령 앞에 둠 (`ftcli -C site grep -C 2 foo`).
+- `find -type d` 는 인덱스의 파일 경로에서 유추하므로 빈 디렉터리는 나오지 않음.
 
 ## 로드맵
 
