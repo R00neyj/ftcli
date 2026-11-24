@@ -84,7 +84,7 @@ ftcli import -C D:/작업물 ftp.md --host "{user}.example.com" --remote-root /w
 | `upload [files...] [-n] [--no-backup]` | `+`/`M` 업로드. 덮어쓰기 전 원격에 `<file>.bak` 생성 |
 | `download [files...] [-n] [--no-backup]` | `-`/`M` 다운로드. 덮어쓰는 로컬 파일은 `.ftcli/backups/<시각>/` 로 보관 |
 | `backup [paths...]` | 원격 파일을 `.ftcli/backups/<시각>/` 로 내려받음 |
-| `rm <paths...> [-r] [-n] [-f] [--no-backup]` (별칭 `del`) | 원격 파일/디렉터리 삭제. 기본 `<경로>.bak` 으로 이동(기존 `.bak` 덮어씀), `--no-backup` 시 완전 삭제. 작업 집합에 등록된 파일은 원격 변경 시 거부(`-f` 로 무시), 삭제 후 `state.json` 에서만 제거(로컬 파일 유지) |
+| `rm <paths...> [-r] [-n] [-f] [--no-backup]` (별칭 `del`) | 원격 파일/디렉터리 삭제. 기본 `<경로>.bak` 으로 이동(기존 `.bak` 은 새 백업 이동이 끝난 뒤 삭제, 이동 실패 시 복원), `--no-backup` 시 완전 삭제. 작업 집합에 등록된 파일은 원격 변경 시 거부(`-f` 로 무시), 삭제 후 `state.json` 에서만 제거(로컬 파일 유지) |
 
 공통 옵션: `-C, --cwd <dir>`, `--password <pw>`. 종료 코드: `0` 성공 / `1` 오류 / `2` 일부 파일 실패.
 

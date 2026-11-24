@@ -1,14 +1,11 @@
-import { Client, FTPError } from "basic-ftp";
+import { Client } from "basic-ftp";
 import { mkdir } from "node:fs/promises";
 import path, { posix } from "node:path";
 import type { Config } from "../config.js";
 import type { Writable } from "node:stream";
+import { isDefinitive } from "./errors.js";
 import type { RemoteEntry, RemoteStat, Transport } from "./types.js";
 
-const CONNECTION_CODES = new Set([421, 425, 426, 530]);
-
-const isDefinitive = (err: unknown): boolean =>
-  err instanceof FTPError && !CONNECTION_CODES.has(err.code);
 
 export class FtpTransport implements Transport {
   private client = new Client(30_000);

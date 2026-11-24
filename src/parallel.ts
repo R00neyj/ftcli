@@ -14,6 +14,8 @@ export interface PoolOptions {
   jobs: number;
   retries: number;
   log?: (line: string) => void;
+  /** false 면 마지막 `result : N ok, M failed` 줄을 출력하지 않음 (호출부가 자체 요약을 낼 때) */
+  summary?: boolean;
 }
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -98,7 +100,7 @@ export async function runPool(ctx: Context, jobs: Job[], opts: PoolOptions): Pro
   if (workers > 1) log(`workers : ${workers}`);
   await Promise.all(Array.from({ length: workers }, (_, i) => slot(i === 0)));
 
-  log(`result : ${ok} ok, ${failed.length} failed`);
+  if (opts.summary !== false) log(`result : ${ok} ok, ${failed.length} failed`);
   if (failed.length > 0) process.exitCode = 2;
   if (fatal) {
     const left = Math.max(0, jobs.length - next);
