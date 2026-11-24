@@ -15,6 +15,10 @@ interface GrepOpts {
   afterContext?: number;
   beforeContext?: number;
   glob: string[];
+  include: string[];
+  exclude: string[];
+  excludeDir: string[];
+  regexp: string[];
   maxSize: number;
   filesWithMatches?: boolean;
   maxCount?: number;
@@ -44,7 +48,14 @@ type FileResult = { binary: true } | { binary: false; matches: Match[]; rows: Ou
 
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-export function lineMatcher(pattern: string, opts: GrepOpts): (line: string) => boolean {
+/** 패턴 여러 개(-e 반복)는 하나라도 맞으면 일치 */
+export function lineMatcher(patterns: string[], opts: GrepOpts): (line: string) => boolean {
+  const tests = patterns.map((p) => singleMatcher(p, opts));
+  const any = tests.length === 1 ? (tests[0] as (line: string) => boolean) : (line: string) => tests.some((t) => t(line));
+  return opts.invertMatch ? (line) => !any(line) : any;
+}
+
+function singleMatcher(pattern: string, opts: GrepOpts): (line: string) => boolean {
   const flags = opts.ignoreCase ? "i" : "";
   let test: (line: string) => boolean;
   if (opts.wordRegexp) {
@@ -60,7 +71,7 @@ export function lineMatcher(pattern: string, opts: GrepOpts): (line: string) => 
     const needle = pattern.toLowerCase();
     test = (line) => line.toLowerCase().includes(needle);
   }
-  return opts.invertMatch ? (line) => !test(line) : test;
+  return test;
 }
 
 export function scan(rel: string, buf: Buffer, test: (line: string) => boolean, opts: GrepOpts): FileResult {
@@ -96,12 +107,21 @@ export function scan(rel: string, buf: Buffer, test: (line: string) => boolean, 
   return { binary: false, matches, rows };
 }
 
-async function grep(ctx: Context, pattern: string, pathArgs: string[], opts: GrepOpts): Promise<void> {
-  const test = lineMatcher(pattern, opts);
+async function grep(ctx: Context, pattern: string | undefined, pathArgs: string[], opts: GrepOpts): Promise<void> {
+  // -e 를 쓰면 첫 위치 인자도 경로임
+  const patterns = opts.regexp.length > 0 ? opts.regexp : pattern !== undefined ? [pattern] : [];
+  if (opts.regexp.length > 0 && pattern !== undefined) pathArgs = [pattern, ...pathArgs];
+  if (patterns.length === 0) throw new Error("검색 패턴 없음");
+  const test = lineMatcher(patterns, opts);
   const prefixes = pathArgs.map(normalizeRel);
   const index = await loadIndexFile(ctx, { refresh: opts.refresh });
   if (!opts.refresh) warnIfStale(index);
-  const globOk = (p: string): boolean => opts.glob.length === 0 || opts.glob.some((g) => matchGlob(g, p));
+  const include = [...opts.glob, ...opts.include];
+  const dirOf = (p: string): string[] => p.split("/").slice(0, -1);
+  const globOk = (p: string): boolean =>
+    (include.length === 0 || include.some((g) => matchGlob(g, p))) &&
+    !opts.exclude.some((g) => matchGlob(g, p)) &&
+    !opts.excludeDir.some((g) => dirOf(p).some((d) => matchGlob(g, d)));
   const entries: IndexEntry[] = index.entries.filter(
     (e) => (prefixes.length === 0 || prefixes.some((d) => underDir(d, e.path))) && globOk(e.path),
   );
@@ -192,7 +212,7 @@ export const registerGrep: Register = (program, run) => {
     .command("grep")
     .alias("rg")
     .description("원격 파일 내용 검색 (디스크 저장 없이 메모리로 받아 검색). 출력은 grep -n 형식 `경로:줄:내용`")
-    .argument("<pattern>", "정규식 (기본) 또는 고정 문자열 (-F)")
+    .argument("[pattern]", "정규식 (기본) 또는 고정 문자열 (-F). -e 사용 시 생략")
     .argument("[paths...]", "검색 범위 원격 경로 (생략 시 전체)")
     .option("-F, --fixed", "패턴을 고정 문자열로 해석")
     .option("-i, --ignore-case", "대소문자 무시")
@@ -207,7 +227,12 @@ export const registerGrep: Register = (program, run) => {
     .option("-r, --recursive", "호환용 (경로를 주면 항상 하위까지 검색)")
     .option("-R", "호환용 (-r 과 같음)")
     .option("-H, --with-filename", "호환용 (파일 경로는 항상 출력)")
+    .option("-e, --regexp <pattern>", "검색 패턴 (반복 가능, 하나라도 맞으면 일치)", collect, [] as string[])
     .option("-g, --glob <g>", "후보 파일 glob 필터 (반복 가능)", collect, [] as string[])
+    .option("--include <g>", "후보 파일 glob 필터 (--glob 과 같음, 반복 가능)", collect, [] as string[])
+    .option("--exclude <g>", "제외할 파일 glob (반복 가능)", collect, [] as string[])
+    .option("--exclude-dir <g>", "제외할 디렉터리 이름 glob (반복 가능)", collect, [] as string[])
+    .option("-I", "호환용 (바이너리 파일은 항상 건너뜀)")
     .option("--max-size <bytes>", "이보다 큰 파일은 건너뜀", intOpt(1, Number.MAX_SAFE_INTEGER), 1048576)
     .option("-l, --files-with-matches", "일치한 파일 경로만 출력")
     .option("-m, --max-count <n>", "파일당 최대 일치 수", intOpt(1, Number.MAX_SAFE_INTEGER))
@@ -215,7 +240,7 @@ export const registerGrep: Register = (program, run) => {
     .option(...retriesOption)
     .option("--json", "JSON 출력")
     .option("--refresh", "검색 전 인덱스 재구축")
-    .action((pattern: string, paths: string[], opts: GrepOpts, cmd) =>
+    .action((pattern: string | undefined, paths: string[], opts: GrepOpts, cmd) =>
       run(cmd, (ctx) => grep(ctx, pattern, paths, opts)),
     );
 };

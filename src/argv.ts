@@ -3,7 +3,7 @@
  * - find: -name / -iname / -path / -type / -maxdepth → --name ...,  -print 는 제거
  * - head / tail: -20 → -n 20
  * - grep / rg: -C 3 / -C3 → --context 3 (전역 옵션 -C(--cwd) 와 충돌 방지)
- * - sed: -i.bak / -i~ / --in-place=.bak → -i (백업 이름은 항상 <경로>.bak)
+ * - sed: -i.bak / -i~ / --in-place=.bak / -i '' → -i (백업 이름은 항상 <경로>.bak)
  * 하위 명령 이전의 전역 옵션과 `--` 이후 인자는 건드리지 않음
  */
 
@@ -68,6 +68,12 @@ function rewriteFor(cmd: string, rest: string[]): string[] {
         continue;
       }
     } else if (cmd === "sed") {
+      // macOS sed 습관: -i '' (백업 접미사 없음) 의 빈 인자는 버림
+      if (a === "-i" && rest[i + 1] === "") {
+        out.push("-i");
+        i++;
+        continue;
+      }
       if (/^-i.+/.test(a) && !a.startsWith("-in")) {
         out.push("-i");
         continue;

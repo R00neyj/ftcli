@@ -47,6 +47,9 @@ async function applyWrites(
     };
   });
   const indexOps: IndexOp[] = [];
+  // 쓰기 후 안내를 나누기 위해 미리 확인 (-f 로 덮어쓴 경우 로컬 수정이 남아 있음)
+  const dirty = new Set<string>();
+  for (const p of plans) if (await hasUnpushedEdits(ctx, ws, p.rel)) dirty.add(p.rel);
   let poolError: unknown;
   try {
     if (jobs.length > 0) {
@@ -59,8 +62,12 @@ async function applyWrites(
       if (done.has(p.rel)) {
         rows.push({ path: p.rel, action: "updated", reason: p.note || undefined });
         indexOps.push({ op: "add", entry: { path: p.rel, size: p.content.length } });
-        if (ws.get(p.rel)) {
-          console.error(`작업 집합 파일 ${p.rel}: 원격이 바뀌었으므로 로컬 사본은 pull --force 로 다시 받아야 함`);
+        if (dirty.has(p.rel)) {
+          console.error(
+            `작업 집합 파일 ${p.rel}: 로컬 수정과 원격 변경이 충돌함(status C). pull --force 는 로컬 수정을 버리므로, 필요한 로컬 수정은 먼저 옮겨 둘 것`,
+          );
+        } else if (ws.get(p.rel)) {
+          console.error(`작업 집합 파일 ${p.rel}: 원격이 바뀌었으므로 pull 로 로컬 사본을 다시 받을 것`);
         }
       } else {
         rows.push({ path: p.rel, action: "failed", reason: "쓰기 실패" });

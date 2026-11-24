@@ -5,7 +5,7 @@ import { backup } from "./commands/backup.js";
 import { diff } from "./commands/diff.js";
 import { download } from "./commands/download.js";
 import { init } from "./commands/init.js";
-import { ls } from "./commands/ls.js";
+import { registerLs } from "./commands/ls.js";
 import { upload } from "./commands/upload.js";
 import { jobsOption, retriesOption, type RunFn } from "./cli.js";
 import { registerCat } from "./commands/cat.js";
@@ -43,19 +43,7 @@ program
     init(path.resolve(cmd.optsWithGlobals<GlobalOpts>().cwd ?? process.cwd())),
   );
 
-program
-  .command("ls")
-  .alias("dir")
-  .description("원격 목록")
-  .argument("[dir]", "원격 경로", "")
-  .option("-r, --recursive", "하위 포함")
-  .option("-R", "-r 과 같음")
-  .option("-l", "호환용 (항상 종류·크기 표시)")
-  .option("-a, --all", "호환용 (숨김 파일도 항상 표시)")
-  .option("--json", "JSON 출력")
-  .action((dir: string, opts: { recursive?: boolean; R?: boolean; json?: boolean }, cmd: Command) =>
-    run(cmd, (ctx) => ls(ctx, dir, { recursive: opts.recursive || opts.R, json: opts.json })),
-  );
+registerLs(program, run);
 
 program
   .command("diff")

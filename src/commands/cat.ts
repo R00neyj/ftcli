@@ -3,12 +3,15 @@ import { finished } from "node:stream/promises";
 import type { Register } from "../cli.js";
 import type { Context } from "../session.js";
 import { normalizeRel } from "../state.js";
+import { mapPool } from "../pmap.js";
+import { readRemoteFile, splitLines } from "../remoteio.js";
 import type { Transport } from "../transport/types.js";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
 interface CatOpts {
   forceLarge?: boolean;
+  number?: boolean;
 }
 
 const isEpipe = (err: unknown): boolean => (err as NodeJS.ErrnoException | null)?.code === "EPIPE";
@@ -119,11 +122,41 @@ async function catImpl(ctx: Context, paths: string[], opts: CatOpts): Promise<vo
   if (failed > 0) process.exitCode = 2;
 }
 
+/** cat -n: 줄 번호(6칸 + 탭)를 붙여 출력. 여러 파일이어도 번호는 이어서 셈 (GNU cat 과 같음) */
+async function catNumbered(ctx: Context, paths: string[], opts: CatOpts): Promise<void> {
+  const rels: string[] = [];
+  for (const arg of paths) {
+    try {
+      const rel = normalizeRel(arg);
+      if (rel === "") throw new Error("파일 경로 아님");
+      rels.push(rel);
+    } catch (err) {
+      console.error(`실패 ${arg}: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 2;
+    }
+  }
+  const results = await mapPool(ctx, rels, { jobs: 4, retries: 1 }, (t, rel) => readRemoteFile(t, rel, opts.forceLarge));
+  let n = 0;
+  results.forEach((r, i) => {
+    if (!r.ok) {
+      console.error(`실패 ${rels[i]}: ${r.error.message}`);
+      process.exitCode = 2;
+      return;
+    }
+    const { lines, trailingNewline } = splitLines(r.value.toString("utf8"));
+    const out = lines.map((l) => `${String(++n).padStart(6)}\t${l}`);
+    process.stdout.write(out.join("\n") + (out.length > 0 && trailingNewline ? "\n" : ""));
+  });
+}
+
 export const registerCat: Register = (program, run) => {
   program
     .command("cat <paths...>")
     .alias("type")
     .description("원격 파일 내용을 다운로드 없이 stdout 으로 출력함")
     .option("--force-large", "5MB 초과 파일도 출력")
-    .action((paths: string[], opts: CatOpts, cmd) => run(cmd, (ctx) => catImpl(ctx, paths, opts)));
+    .option("-n, --number", "줄 번호 붙여 출력")
+    .action((paths: string[], opts: CatOpts, cmd) =>
+      run(cmd, (ctx) => (opts.number ? catNumbered(ctx, paths, opts) : catImpl(ctx, paths, opts))),
+    );
 };
