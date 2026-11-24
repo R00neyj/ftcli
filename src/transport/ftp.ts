@@ -2,7 +2,7 @@ import { Client } from "basic-ftp";
 import { mkdir } from "node:fs/promises";
 import path, { posix } from "node:path";
 import type { Config } from "../config.js";
-import type { Writable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 import { isDefinitive } from "./errors.js";
 import type { RemoteEntry, RemoteStat, Transport } from "./types.js";
 
@@ -108,6 +108,18 @@ export class FtpTransport implements Transport {
 
   async removeDir(remotePath: string): Promise<void> {
     await this.client.removeDir(this.abs(remotePath));
+  }
+
+  async mkdir(remotePath: string): Promise<void> {
+    await this.client.send(`MKD ${this.abs(remotePath)}`);
+  }
+
+  async chmod(remotePath: string, mode: string): Promise<void> {
+    await this.client.send(`SITE CHMOD ${mode} ${this.abs(remotePath)}`);
+  }
+
+  async uploadFromStream(source: Readable, remotePath: string): Promise<void> {
+    await this.client.uploadFrom(source, this.abs(remotePath));
   }
 
   private abs(rel: string): string {

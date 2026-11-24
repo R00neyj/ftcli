@@ -1,10 +1,10 @@
 import type { Command } from "commander";
-import { posix } from "node:path";
 import { jobsOption, printJson, retriesOption, type Register, type ResultRow } from "../cli.js";
+import { patchIndex, type IndexOp } from "../indexer.js";
 import { runPool, type Job } from "../parallel.js";
 import type { Context } from "../session.js";
 import { normalizeRel, remoteSha256, remoteVerdict, WorkSet, type BaseEntry } from "../state.js";
-import { isPermanentReply } from "../transport/errors.js";
+import { findEntry, listOrEmpty, message, moveToBak, parentOf } from "../remote-ops.js";
 import { BAK_SUFFIX, type RemoteEntry, type Transport } from "../transport/types.js";
 import { underPrefix } from "./status.js";
 
@@ -24,34 +24,9 @@ interface Target {
   tracked: string[];
 }
 
-/** 기존 .bak 을 새 백업으로 교체하는 동안 잠시 옮겨 두는 이름 */
-const OLD_BAK_SUFFIX = ".ftcli-old";
-
 type Guard = { conflict: string } | { unverified: boolean };
 
-const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
-
 const byPath = (a: ResultRow, b: ResultRow): number => a.path.localeCompare(b.path);
-
-const parentOf = (rel: string): string => {
-  const dir = posix.dirname(rel);
-  return dir === "." ? "" : dir;
-};
-
-async function listOrEmpty(t: Transport, dir: string): Promise<RemoteEntry[]> {
-  try {
-    return await t.list(dir, false);
-  } catch (err) {
-    // 550 같은 확정 응답만 "없음" 으로 봄. 연결 오류·일시적 4xx 는 재시도되도록 그대로 던짐
-    if (!isPermanentReply(err)) throw err;
-    return [];
-  }
-}
-
-async function findEntry(t: Transport, rel: string): Promise<RemoteEntry | undefined> {
-  const entries = await listOrEmpty(t, parentOf(rel));
-  return entries.find((e) => e.path === rel);
-}
 
 /**
  * 원격이 base 이후 바뀌지 않았는지 확인함
@@ -88,54 +63,6 @@ async function checkGuard(t: Transport, ws: WorkSet, target: Target, deep: boole
   return { conflict: `충돌: 하위 원격 변경됨 (${sample}) (--force 로 강제 삭제)` };
 }
 
-async function removeEntry(t: Transport, entry: RemoteEntry): Promise<void> {
-  if (entry.isDir) await t.removeDir(entry.path);
-  else await t.remove(entry.path, true);
-}
-
-/**
- * rel 을 rel.bak 으로 옮김. 기존 .bak 은 먼저 .bak.ftcli-old 로 비켜 두고,
- * 새 백업 이동이 끝난 뒤에만 지움 (이동 실패 시 원래 이름으로 되돌림)
- * 매 시도마다 상위 목록으로 진행 상태를 확인하므로 재시도해도 안전함
- */
-async function moveToBak(t: Transport, rel: string): Promise<void> {
-  const bak = `${rel}${BAK_SUFFIX}`;
-  const old = `${bak}${OLD_BAK_SUFFIX}`;
-  const parent = await listOrEmpty(t, parentOf(rel));
-  const relEntry = parent.find((e) => e.path === rel);
-  const bakEntry = parent.find((e) => e.path === bak);
-  let oldEntry = parent.find((e) => e.path === old);
-
-  if (!relEntry) {
-    // 이전 시도에서 이동은 끝났고 응답만 잃은 경우
-    if (!bakEntry) throw new Error("원격에 없음");
-    if (oldEntry) await removeEntry(t, oldEntry);
-    return;
-  }
-
-  let stashed = false;
-  if (bakEntry) {
-    // 이전 실행이 남긴 .ftcli-old 는 현재 .bak 보다 오래된 것이므로 정리
-    if (oldEntry) await removeEntry(t, oldEntry);
-    await t.rename(bak, old);
-    oldEntry = { ...bakEntry, path: old };
-    stashed = true;
-  }
-
-  try {
-    await t.rename(rel, bak);
-  } catch (err) {
-    const after = await listOrEmpty(t, parentOf(rel));
-    const replyLost = !after.some((e) => e.path === rel) && after.some((e) => e.path === bak);
-    if (!replyLost) {
-      if (stashed) await t.rename(old, bak).catch(() => {});
-      throw err;
-    }
-  }
-
-  if (oldEntry) await removeEntry(t, oldEntry);
-}
-
 async function removePermanently(
   t: Transport,
   target: Target,
@@ -156,6 +83,7 @@ function rmJob(
   opts: RmOpts,
   rows: Map<string, ResultRow>,
   markDirty: () => void,
+  indexOps: IndexOp[],
 ): Job {
   const { rel, isDir, tracked } = target;
   const suffix = isDir ? "/" : "";
@@ -188,6 +116,7 @@ function rmJob(
       markDirty();
     }
 
+    indexOps.push(opts.backup ? { op: "rename", from: rel, to: bak } : { op: "remove", prefix: rel });
     label = opts.backup ? `- ${rel}${suffix} -> ${bak}${suffix}` : `- ${rel}${suffix} (삭제)`;
     return { path: rel, action: "removed", reason: actionNote };
   };
@@ -317,6 +246,7 @@ async function rmCmd(ctx: Context, args: string[], opts: RmOpts): Promise<void> 
     wsDirty = true;
   };
   let poolError: unknown;
+  const indexOps: IndexOp[] = [];
 
   try {
     targets = await resolveTargets(ctx, ws, args, opts, rows, markDirty);
@@ -331,7 +261,7 @@ async function rmCmd(ctx: Context, args: string[], opts: RmOpts): Promise<void> 
         poolTargets.push(t);
       }
     }
-    const jobs = poolTargets.map((t) => rmJob(ws, t, opts, rows, markDirty));
+    const jobs = poolTargets.map((t) => rmJob(ws, t, opts, rows, markDirty, indexOps));
     if (jobs.length > 0) {
       await runPool(ctx, jobs, {
         jobs: opts.jobs,
@@ -344,6 +274,7 @@ async function rmCmd(ctx: Context, args: string[], opts: RmOpts): Promise<void> 
     poolError = err;
   } finally {
     if (!opts.dryRun && wsDirty) await ws.save();
+    await patchIndex(ctx, indexOps).catch((err) => console.error(`인덱스 갱신 실패 (find --refresh 권장): ${message(err)}`));
   }
 
   for (const t of targets) {

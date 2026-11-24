@@ -1,4 +1,4 @@
-import type { Writable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 
 export const BAK_SUFFIX = ".bak";
 
@@ -27,4 +27,9 @@ export interface Transport {
   rename(from: string, to: string): Promise<void>;
   remove(remotePath: string, ignoreMissing?: boolean): Promise<void>;
   removeDir(remotePath: string): Promise<void>;
+  /** 부모가 있어야 하며 이미 있으면 실패 (mkdir -p 는 mkdirs) */
+  mkdir(remotePath: string): Promise<void>;
+  /** SITE CHMOD. 서버가 지원하지 않으면 500/502/504 */
+  chmod(remotePath: string, mode: string): Promise<void>;
+  uploadFromStream(source: Readable, remotePath: string): Promise<void>;
 }

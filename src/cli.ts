@@ -21,6 +21,10 @@ export type RowAction =
   | "pushed"
   | "released"
   | "removed"
+  | "moved"
+  | "copied"
+  | "created"
+  | "updated"
   | "skipped"
   | "planned"
   | "failed";

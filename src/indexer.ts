@@ -85,6 +85,44 @@ export async function buildIndex(ctx: Context, dir = ""): Promise<IndexFile> {
   return data;
 }
 
+export type IndexOp =
+  | { op: "remove"; prefix: string }
+  | { op: "rename"; from: string; to: string }
+  | { op: "add"; entry: IndexEntry };
+
+/** scanRemote 와 같은 규칙: x 가 있으면 x.bak 은 숨김 */
+function hideBak(entries: IndexEntry[]): IndexEntry[] {
+  const paths = new Set(entries.map((e) => e.path));
+  return entries.filter((e) => !(e.path.endsWith(BAK_SUFFIX) && paths.has(e.path.slice(0, -BAK_SUFFIX.length))));
+}
+
+/**
+ * 원격을 바꾼 명령(rm, mv, cp, touch, tee, sed -i)이 기존 인덱스를 같은 결과로 고쳐 둠
+ * 인덱스가 없으면 아무것도 하지 않음 (다음 find/grep 이 새로 구축)
+ */
+export async function patchIndex(ctx: Pick<Context, "cwd" | "ig">, ops: IndexOp[]): Promise<void> {
+  if (ops.length === 0) return;
+  const data = await readIndex(ctx.cwd);
+  if (!data) return;
+  const map = new Map(data.entries.map((e) => [e.path, e] as const));
+  for (const o of ops) {
+    if (o.op === "remove") {
+      for (const p of [...map.keys()]) if (underDir(o.prefix, p)) map.delete(p);
+    } else if (o.op === "rename") {
+      for (const [p, e] of [...map]) {
+        if (!underDir(o.from, p)) continue;
+        map.delete(p);
+        const to = o.to + p.slice(o.from.length);
+        map.set(to, { ...e, path: to });
+      }
+    } else if (!ctx.ig.ignores(o.entry.path)) {
+      map.set(o.entry.path, o.entry);
+    }
+  }
+  const entries = hideBak([...map.values()]).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  await writeIndex(ctx.cwd, { ...data, entries });
+}
+
 export async function loadIndexFile(ctx: Context, opts: { refresh?: boolean } = {}): Promise<IndexFile> {
   const existing = opts.refresh ? null : await readIndex(ctx.cwd);
   return existing ?? buildIndex(ctx);
