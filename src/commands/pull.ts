@@ -1,4 +1,3 @@
-import { FTPError } from "basic-ftp";
 import type { Command } from "commander";
 import type { Ignore } from "ignore";
 import { constants } from "node:fs";
@@ -19,6 +18,7 @@ import {
   type LocalInfo,
 } from "../state.js";
 import { downloadVerified } from "../transfer.js";
+import { isPermanentReply } from "../transport/errors.js";
 import { BAK_SUFFIX, type RemoteEntry, type RemoteStat, type Transport } from "../transport/types.js";
 
 interface PullOpts {
@@ -43,7 +43,6 @@ type Plan = { kind: "pull"; overwrite: boolean; why: string } | { kind: "skip"; 
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-const CONNECTION_CODES = new Set([421, 425, 426, 530]);
 const CASE_INSENSITIVE_FS = process.platform === "win32" || process.platform === "darwin";
 const CASE_CONFLICT = "대소문자만 다른 경로 충돌";
 
@@ -64,7 +63,8 @@ async function listOrEmpty(t: Transport, dir: string): Promise<RemoteEntry[]> {
   try {
     return await t.list(dir, false);
   } catch (err) {
-    if (!(err instanceof FTPError) || CONNECTION_CODES.has(err.code)) throw err;
+    // 550 같은 확정 응답만 "없음" 으로 봄. 연결 오류·일시적 4xx 는 그대로 던짐
+    if (!isPermanentReply(err)) throw err;
     return [];
   }
 }
