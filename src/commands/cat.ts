@@ -122,6 +122,7 @@ async function catImpl(ctx: Context, paths: string[], opts: CatOpts): Promise<vo
 export const registerCat: Register = (program, run) => {
   program
     .command("cat <paths...>")
+    .alias("type")
     .description("원격 파일 내용을 다운로드 없이 stdout 으로 출력함")
     .option("--force-large", "5MB 초과 파일도 출력")
     .action((paths: string[], opts: CatOpts, cmd) => run(cmd, (ctx) => catImpl(ctx, paths, opts)));

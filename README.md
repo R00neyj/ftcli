@@ -79,11 +79,12 @@ ftcli import -C D:/작업물 ftp.md --host "{user}.example.com" --remote-root /w
 
 | 명령 | 설명 |
 |---|---|
-| `ls [dir] [-r]` | 원격 목록 |
+| `ls [dir] [-r]` (별칭 `dir`) | 원격 목록 |
 | `diff [files...] [--verify]` | 로컬 vs 원격 (`+` 로컬만 / `-` 원격만 / `M` 다름). 기본은 크기 비교, `--verify` 는 해시 비교 |
 | `upload [files...] [-n] [--no-backup]` | `+`/`M` 업로드. 덮어쓰기 전 원격에 `<file>.bak` 생성 |
 | `download [files...] [-n] [--no-backup]` | `-`/`M` 다운로드. 덮어쓰는 로컬 파일은 `.ftcli/backups/<시각>/` 로 보관 |
 | `backup [paths...]` | 원격 파일을 `.ftcli/backups/<시각>/` 로 내려받음 |
+| `rm <paths...> [-r] [-n] [-f] [--no-backup]` (별칭 `del`) | 원격 파일/디렉터리 삭제. 기본 `<경로>.bak` 으로 이동(기존 `.bak` 덮어씀), `--no-backup` 시 완전 삭제. 작업 집합에 등록된 파일은 원격 변경 시 거부(`-f` 로 무시), 삭제 후 `state.json` 에서만 제거(로컬 파일 유지) |
 
 공통 옵션: `-C, --cwd <dir>`, `--password <pw>`. 종료 코드: `0` 성공 / `1` 오류 / `2` 일부 파일 실패.
 
@@ -108,7 +109,7 @@ ftcli import -C D:/작업물 ftp.md --host "{user}.example.com" --remote-root /w
 |---|---|
 | `find <패턴>` / `index` | 원격 경로 검색용 캐시(`.ftcli/index.json`) 구축·조회. glob(`**`,`*`,`?`) / 부분 문자열 / `--regex` |
 | `grep <패턴> [경로...]` | 원격 내용 검색. 디스크 저장 없이 메모리로 받아 검색. `-F -i --glob --max-size -l -m` |
-| `cat <경로...>` | 다운로드 없이 stdout 출력 (5MB 초과는 `--force-large`) |
+| `cat <경로...>` (별칭 `type`) | 다운로드 없이 stdout 출력 (5MB 초과는 `--force-large`) |
 | `pull <경로...>` | 선택한 파일/디렉터리만 받고 base 기록. 로컬 수정분은 `--force` 없이는 보호 |
 | `status [경로...]` | 작업 집합 상태. `M` 로컬 수정 / `R` 원격 변경 / `C` 충돌 / `!` 로컬 없음 / `D` 원격 삭제. 전체 LIST 없이 파일별 SIZE/MDTM 만 조회 |
 | `push [파일...]` | 로컬 수정분 업로드. 원격이 base 와 다르면 거부(`--force` 로 무시). 덮어쓰기 전 원격 `.bak`, 업로드 후 크기 검증과 base 갱신. 작업 집합에 없는 명시 경로는 원격에 없을 때만 신규 업로드 |

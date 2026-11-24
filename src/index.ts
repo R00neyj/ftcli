@@ -15,6 +15,7 @@ import { registerGrep } from "./commands/grep.js";
 import { registerPull } from "./commands/pull.js";
 import { registerPush } from "./commands/push.js";
 import { registerRelease } from "./commands/release.js";
+import { registerRm } from "./commands/rm.js";
 import { registerStatus } from "./commands/status.js";
 import { withContext, type GlobalOpts } from "./session.js";
 
@@ -38,6 +39,7 @@ program
 
 program
   .command("ls")
+  .alias("dir")
   .description("원격 목록")
   .argument("[dir]", "원격 경로", "")
   .option("-r, --recursive", "하위 포함")
@@ -82,6 +84,7 @@ program
 registerPull(program, run);
 registerStatus(program, run);
 registerPush(program, run);
+registerRm(program, run);
 registerCat(program, run);
 registerFind(program, run);
 registerGrep(program, run);

@@ -109,6 +109,10 @@ export class FtpTransport implements Transport {
     await this.client.remove(this.abs(remotePath), ignoreMissing);
   }
 
+  async removeDir(remotePath: string): Promise<void> {
+    await this.client.removeDir(this.abs(remotePath));
+  }
+
   private abs(rel: string): string {
     return posix.join(this.cfg.remoteRoot, rel);
   }

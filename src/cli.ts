@@ -16,7 +16,14 @@ export const retriesOption = [
 ] as const;
 export const intOpt = intOption;
 
-export type RowAction = "pulled" | "pushed" | "released" | "skipped" | "planned" | "failed";
+export type RowAction =
+  | "pulled"
+  | "pushed"
+  | "released"
+  | "removed"
+  | "skipped"
+  | "planned"
+  | "failed";
 
 export interface ResultRow {
   path: string;

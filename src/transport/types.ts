@@ -26,4 +26,5 @@ export interface Transport {
   stat(remotePath: string): Promise<RemoteStat | null>;
   rename(from: string, to: string): Promise<void>;
   remove(remotePath: string, ignoreMissing?: boolean): Promise<void>;
+  removeDir(remotePath: string): Promise<void>;
 }
